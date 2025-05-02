@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -38,7 +39,7 @@ export default function Home() {
 
       <Card className="w-full max-w-md mb-4 bg-card text-card-foreground shadow-lg">
         <CardHeader className="flex flex-row items-center justify-between pb-2 space-x-4">
-          <CardTitle className="text-2xl font-bold text-primary">PongTris</CardTitle> {/* Renamed */}
+          <CardTitle className="text-2xl font-bold text-primary">Pongtris</CardTitle> {/* Renamed */}
           <div className="flex items-center space-x-4 text-right">
              <div className="text-base font-semibold text-secondary-foreground">
                  Speed: {speedMultiplier.toFixed(2)}x
@@ -49,7 +50,7 @@ export default function Home() {
         <CardContent className="flex flex-col items-center justify-center">
           {!gameStarted && !gameOver && (
             <div className="text-center py-10">
-              <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to PongTris!</h2> {/* Renamed */}
+              <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to Pongtris!</h2> {/* Renamed */}
               <p className="mb-6 text-lg">Clear lines, break bricks!</p>
               <Button onClick={startGame} size="lg">Start Game</Button>
             </div>
@@ -92,3 +93,4 @@ export default function Home() {
     </div>
   );
 }
+
