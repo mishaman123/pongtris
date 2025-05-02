@@ -74,7 +74,7 @@ export const useTetroPongGame = () => {
     // Calculate speed multiplier based on score
     const speedMultiplier = useMemo(() => {
         const levels = Math.floor(score / 20); // Increase level every 20 points
-        return 1 + levels * 0.05; // Add 5% speed per level
+        return Math.pow(1.05, levels); // Apply cumulative 5% increase per level
     }, [score]);
 
 
@@ -411,37 +411,29 @@ export const useTetroPongGame = () => {
                 prevBall.dy > 0 // Ensure ball is moving downwards
             ) {
                  // Apply speed multiplier to base speed on bounce
-                 const baseSpeed = Math.sqrt(INITIAL_BALL_SPEED_X**2 + INITIAL_BALL_SPEED_Y**2);
-                 const currentSpeedMagnitude = baseSpeed * speedMultiplier;
+                 const baseSpeedX = INITIAL_BALL_SPEED_X;
+                 const baseSpeedY = INITIAL_BALL_SPEED_Y;
+                 const currentSpeedMagnitudeX = baseSpeedX * speedMultiplier;
+                 const currentSpeedMagnitudeY = baseSpeedY * speedMultiplier;
 
-                 newDy = -Math.abs(INITIAL_BALL_SPEED_Y); // Use initial Y speed magnitude for consistent bounce angle base
+                 newDy = -Math.abs(currentSpeedMagnitudeY); // Bounce up with current speed
                  nextY = paddleTop - BALL_RADIUS; // Place ball exactly on top of paddle
 
                  // Adjust horizontal speed based on hit position on paddle
                  const hitPosRatio = (nextX - (paddleLeft + PADDLE_WIDTH / 2)) / (PADDLE_WIDTH / 2);
                  const clampedHitPosRatio = Math.max(-1, Math.min(1, hitPosRatio));
                  const maxHorizontalFactor = 1.5; // Angle variation
-                 newDx = clampedHitPosRatio * Math.abs(INITIAL_BALL_SPEED_X) * maxHorizontalFactor;
+                 newDx = clampedHitPosRatio * currentSpeedMagnitudeX * maxHorizontalFactor;
 
-                 // Normalize and scale velocity vector to the current speed magnitude
-                 const bounceMagnitude = Math.sqrt(newDx**2 + newDy**2);
-                 if (bounceMagnitude > 0) {
-                    newDx = (newDx / bounceMagnitude) * currentSpeedMagnitude;
-                    newDy = (newDy / bounceMagnitude) * currentSpeedMagnitude;
-                 } else {
-                     // Handle zero magnitude case (e.g., direct center hit) - assign vertical bounce
-                     newDx = 0;
-                     newDy = -currentSpeedMagnitude;
-                 }
+                  // Simple speed limit to prevent extreme horizontal speeds after angle adjustment
+                  const maxDx = currentSpeedMagnitudeX * maxHorizontalFactor;
+                  newDx = Math.max(-maxDx, Math.min(maxDx, newDx));
 
-                 // Prevent ball from having too slow horizontal speed after angle adjustment
-                 const minHorizontalRatio = 0.2;
-                 if (Math.abs(newDx) < Math.abs(INITIAL_BALL_SPEED_X * speedMultiplier * minHorizontalRatio)) {
-                    newDx = Math.sign(newDx || (Math.random() > 0.5 ? 1 : -1)) * Math.abs(INITIAL_BALL_SPEED_X * speedMultiplier * minHorizontalRatio);
-                    // Recalculate dy to maintain magnitude (optional, could just keep newDy)
-                    const remainingDySq = currentSpeedMagnitude**2 - newDx**2;
-                    newDy = -Math.sqrt(Math.max(0, remainingDySq)); // Bounce up
-                 }
+                 // // Prevent ball from having too slow horizontal speed after angle adjustment (Optional refinement)
+                 // const minHorizontalRatio = 0.2;
+                 // if (Math.abs(newDx) < currentSpeedMagnitudeX * minHorizontalRatio) {
+                 //    newDx = Math.sign(newDx || (Math.random() > 0.5 ? 1 : -1)) * currentSpeedMagnitudeX * minHorizontalRatio;
+                 // }
             }
 
 
@@ -507,13 +499,13 @@ export const useTetroPongGame = () => {
                                      newDy = prevBall.dy; // Keep vertical velocity
                                  }
 
-                                 // Break the collided brick (ANY merged brick)
+                                 // Break the collided brick (ANY merged brick, including 'G')
                                  mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
                                  brickBroken = true;
 
 
-                                 // Use goto-like break (exit both loops)
-                                 gotoCollisionEnd(); // Exit loops after handling one collision
+                                 // Break loop after first collision handling
+                                 gotoCollisionEnd(); // Use goto to break out of nested loops cleanly
                              }
                          }
                     }
