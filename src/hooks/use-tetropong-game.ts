@@ -73,9 +73,10 @@ export const useTetroPongGame = () => {
 
     // Calculate speed multiplier based on score
     const speedMultiplier = useMemo(() => {
-        const levels = Math.floor(score / 20);
-        return 1 + levels * 0.05;
+        const levels = Math.floor(score / 20); // Increase level every 20 points
+        return 1 + levels * 0.05; // Add 5% speed per level
     }, [score]);
+
 
     useEffect(() => {
         setIsClient(true); // Component has mounted, safe to use browser APIs
@@ -454,10 +455,9 @@ export const useTetroPongGame = () => {
             const gridYMax = Math.min(TETRIS_HEIGHT - 1, Math.floor(nextY + BALL_RADIUS));
 
             let collidedBrickX = -1, collidedBrickY = -1;
-            let minCollisionTime = Infinity;
             let collisionNormalX = 0, collisionNormalY = 0;
 
-
+            // --- Collision Detection & Resolution Loop ---
             for (let y = gridYMin; y <= gridYMax; y++) {
                 for (let x = gridXMin; x <= gridXMax; x++) {
                      // Check if the cell exists and is a 'merged' Tetris block (and not grey 'G')
@@ -467,61 +467,63 @@ export const useTetroPongGame = () => {
                          const brickTop = y;
                          const brickBottom = y + 1;
 
-                        // Simple AABB collision check for potential candidates
-                        if (nextX + BALL_RADIUS > brickLeft && nextX - BALL_RADIUS < brickRight &&
-                            nextY + BALL_RADIUS > brickTop && nextY - BALL_RADIUS < brickBottom) {
+                         // Simple AABB check first
+                         if (nextX + BALL_RADIUS > brickLeft && nextX - BALL_RADIUS < brickRight &&
+                             nextY + BALL_RADIUS > brickTop && nextY - BALL_RADIUS < brickBottom)
+                         {
+                             // More accurate check: Find closest point on brick to ball center
+                             const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
+                             const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
+                             const distX = nextX - closestX;
+                             const distY = nextY - closestY;
 
-                            // Check collision more accurately, considering ball trajectory
-                            // Determine potential collision point and normal
-                            const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
-                            const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
-                            const distX = nextX - closestX;
-                            const distY = nextY - closestY;
+                             // Check if distance squared is less than radius squared
+                             if ((distX * distX + distY * distY) < (BALL_RADIUS * BALL_RADIUS)) {
+                                 // Collision occurred
+                                 collidedBrickX = x;
+                                 collidedBrickY = y;
+                                 collisionHandled = true;
 
-                            if (distX * distX + distY * distY < BALL_RADIUS * BALL_RADIUS) {
-                                // Calculate penetration
-                                const penetrationX = BALL_RADIUS - Math.abs(distX);
-                                const penetrationY = BALL_RADIUS - Math.abs(distY);
+                                 // Determine penetration depth
+                                 const penX = BALL_RADIUS - Math.abs(distX);
+                                 const penY = BALL_RADIUS - Math.abs(distY);
 
-                                // Determine collision side based on penetration depth
-                                if (!collisionHandled || (penetrationX < Infinity && penetrationY < Infinity) /* Add better time logic if needed */) {
-                                    collisionHandled = true;
-                                    collidedBrickX = x;
-                                    collidedBrickY = y;
+                                 // Determine collision normal based on smallest penetration
+                                 if (penY < penX) { // Vertical collision
+                                     collisionNormalY = (distY > 0) ? 1 : -1;
+                                     collisionNormalX = 0;
+                                     // Correct position: Move ball out along the normal
+                                     nextY = (collisionNormalY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
+                                     // Reflect velocity
+                                     newDy = -prevBall.dy;
+                                     newDx = prevBall.dx; // Keep horizontal velocity
+                                 } else { // Horizontal collision
+                                     collisionNormalX = (distX > 0) ? 1 : -1;
+                                     collisionNormalY = 0;
+                                     // Correct position
+                                     nextX = (collisionNormalX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
+                                     // Reflect velocity
+                                     newDx = -prevBall.dx;
+                                     newDy = prevBall.dy; // Keep vertical velocity
+                                 }
 
-                                    if (penetrationY < penetrationX) { // Vertical collision dominant
-                                        collisionNormalX = 0;
-                                        collisionNormalY = distY > 0 ? 1 : -1;
-                                        nextY = (collisionNormalY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
-                                    } else { // Horizontal collision dominant
-                                        collisionNormalX = distX > 0 ? 1 : -1;
-                                        collisionNormalY = 0;
-                                        nextX = (collisionNormalX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
-                                    }
-                                    // Reflect velocity based on normal
-                                    if (collisionNormalY !== 0) newDy = -newDy;
-                                    if (collisionNormalX !== 0) newDx = -newDx;
-                                }
-                            }
-                        }
+                                 // Break the collided brick (if not grey)
+                                 if (mutableGrid[collidedBrickY]?.[collidedBrickX]?.[0] !== 'G') {
+                                     mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
+                                     brickBroken = true;
+                                 }
+
+                                 // Use goto-like break (exit both loops)
+                                 gotoCollisionEnd(); // Exit loops after handling one collision
+                             }
+                         }
                     }
-                 }
-            }
-
-
-            if (collisionHandled && collidedBrickX !== -1 && collidedBrickY !== -1) {
-                // Break the collided brick
-                if (mutableGrid[collidedBrickY]?.[collidedBrickX]?.[0] !== 'G') { // Ensure not breaking grey block
-                    mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
-                    brickBroken = true;
-                } else {
-                    // If hit grey block, still bounce but don't break/score
-                    collisionHandled = true; // Make sure bounce happens
-                    brickBroken = false; // No score
                 }
             }
 
+            function gotoCollisionEnd() {} // Label for breaking out
 
+            // --- Post-Collision Updates ---
             if (brickBroken) {
                 setGrid(mutableGrid); // Update grid state only if a brick was broken
                 setScore(prev => prev + BRICK_BREAK_SCORE);
@@ -681,6 +683,7 @@ export const useTetroPongGame = () => {
         gameOver,
         gameStarted,
         startGame,
+        speedMultiplier, // Expose the speed multiplier
         // Expose constants needed for rendering
         gridWidth: TETRIS_WIDTH,
         gridHeight: TOTAL_GRID_HEIGHT,

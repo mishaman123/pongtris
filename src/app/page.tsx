@@ -18,27 +18,39 @@ export default function Home() {
     startGame,
     gridWidth,
     gridHeight,
-    tetrisHeight, // Get tetrisHeight from the hook
+    tetrisHeight,
     paddleWidth,
     paddleHeight,
     ballRadius,
     paddleY,
+    speedMultiplier, // Get speed multiplier
   } = useTetroPongGame();
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-background text-foreground">
+    <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-background text-foreground relative">
+       {/* Controls Overlay - Top Right */}
+       <div className="absolute top-4 right-4 text-right text-xs text-muted-foreground bg-card/80 p-2 rounded-md shadow">
+          <h4 className="font-semibold mb-1 text-sm text-primary-foreground">Controls</h4>
+          <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Space: Hard Drop)</p>
+          <p><span className="font-semibold">Pong:</span> A (Left), S (Right)</p>
+       </div>
+
       <Card className="w-full max-w-md mb-4 bg-card text-card-foreground shadow-lg">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardHeader className="flex flex-row items-center justify-between pb-2 space-x-4">
           <CardTitle className="text-2xl font-bold text-primary">TetroPong</CardTitle>
-          <div className="text-xl font-semibold text-accent">Score: {score}</div>
+          <div className="flex items-center space-x-4 text-right">
+             <div className="text-base font-semibold text-secondary-foreground">
+                 Speed: {speedMultiplier.toFixed(2)}x
+              </div>
+            <div className="text-xl font-semibold text-accent">Score: {score}</div>
+          </div>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center">
           {!gameStarted && !gameOver && (
             <div className="text-center py-10">
               <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to TetroPong!</h2>
               <p className="mb-6 text-lg">Clear lines, break bricks!</p>
-              <p className="mb-1"><span className="font-semibold text-primary">Tetris:</span> Arrows (Up: Rotate, Space: Hard Drop)</p>
-              <p className="mb-6"><span className="font-semibold text-primary">Pong:</span> A (Left), S (Right)</p>
+              {/* Instructions moved to top right */}
               <Button onClick={startGame} size="lg">Start Game</Button>
             </div>
           )}
@@ -61,7 +73,7 @@ export default function Home() {
                     paddle={paddle}
                     gridWidth={gridWidth}
                     gridHeight={gridHeight}
-                    tetrisHeight={tetrisHeight} // Pass tetrisHeight
+                    tetrisHeight={tetrisHeight}
                     paddleWidth={paddleWidth}
                     paddleHeight={paddleHeight}
                     ballRadius={ballRadius}
@@ -71,13 +83,7 @@ export default function Home() {
           )}
         </CardContent>
       </Card>
-       {/* Instructions Footer */}
-       {!gameOver && (
-         <div className="mt-4 text-center text-muted-foreground text-sm">
-           <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Space: Hard Drop)</p>
-           <p><span className="font-semibold">Pong:</span> A (Left), S (Right)</p>
-         </div>
-       )}
+       {/* Instructions Footer Removed */}
     </div>
   );
 }
