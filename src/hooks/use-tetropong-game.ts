@@ -155,7 +155,7 @@ export const useTetroPongGame = () => {
 
      // --- Tetris Logic ---
      const resetPlayer = useCallback((currentGrid: TetrisGrid) => {
-        if (gameOver) return; // Don't reset if game over
+        if (gameOver) return false; // Don't reset if game over
 
         const { type, piece } = getRandomTetromino();
         const newPlayerPos = { x: TETRIS_WIDTH / 2 - Math.floor(piece.shape[0].length / 2), y: 0 };
@@ -177,8 +177,12 @@ export const useTetroPongGame = () => {
                 collided: false,
             });
             // Reset drop time based on *current* speed multiplier when a new piece starts
-            const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
-            setTetrisDropTime(nextDropTime);
+            // Important: Use the current speed multiplier directly in calculations,
+            // but use the *base* drop interval for setting the initial timer duration.
+            // The interval hook itself will use the current 'tetrisDropTime' state.
+            const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
+            setTetrisDropTime(initialDropTime);
+
             return true; // Indicate successful reset
         }
     }, [checkTetrisCollision, speedMultiplier, gameOver]); // Remove grid dependency, pass it in
@@ -416,6 +420,7 @@ export const useTetroPongGame = () => {
             let newDyDirection = prevBall.dy;
             let brickBroken = false;
             let mutableGrid = grid.map(row => [...row]); // Create mutable copy for potential brick break
+            let collisionHandled = false; // Flag to prevent multiple collision logic per tick
 
             nextX += currentDx;
             nextY += currentDy;
@@ -426,112 +431,136 @@ export const useTetroPongGame = () => {
             if (nextX - BALL_RADIUS < 0 && currentDx < 0) {
                 newDxDirection = Math.abs(prevBall.dx);
                 nextX = BALL_RADIUS;
+                collisionHandled = true;
             } else if (nextX + BALL_RADIUS > GAME_WIDTH && currentDx > 0) {
                 newDxDirection = -Math.abs(prevBall.dx);
                 nextX = GAME_WIDTH - BALL_RADIUS;
+                collisionHandled = true;
             }
 
             // Top Wall (ceiling) - Bounce off y=0
             if (nextY - BALL_RADIUS < 0 && currentDy < 0) {
                 newDyDirection = Math.abs(prevBall.dy);
                 nextY = BALL_RADIUS;
+                collisionHandled = true;
                  if (Math.abs(newDxDirection) < minDxThreshold) {
+                     // Slightly adjust horizontal direction if too vertical
                      newDxDirection = minDxThreshold * (newDxDirection >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1);
                  }
             }
 
             // --- Paddle Collision ---
-            const paddleTop = PADDLE_Y;
-            const paddleBottom = PADDLE_Y + PADDLE_HEIGHT;
-            const paddleLeft = paddle.x; // Use current paddle state directly
-            const paddleRight = paddle.x + PADDLE_WIDTH;
+            if (!collisionHandled) { // Only check paddle if no wall collision yet
+                const paddleTop = PADDLE_Y;
+                const paddleBottom = PADDLE_Y + PADDLE_HEIGHT;
+                const paddleLeft = paddle.x; // Use current paddle state directly
+                const paddleRight = paddle.x + PADDLE_WIDTH;
 
-            if (
-                nextY + BALL_RADIUS > paddleTop &&
-                nextY - BALL_RADIUS < paddleBottom &&
-                nextX + BALL_RADIUS > paddleLeft &&
-                nextX - BALL_RADIUS < paddleRight &&
-                currentDy > 0 // Ball moving down
-            ) {
-                 newDyDirection = -Math.abs(prevBall.dy);
-                 nextY = paddleTop - BALL_RADIUS; // Place ball exactly on top
+                if (
+                    nextY + BALL_RADIUS > paddleTop &&
+                    nextY - BALL_RADIUS < paddleBottom &&
+                    nextX + BALL_RADIUS > paddleLeft &&
+                    nextX - BALL_RADIUS < paddleRight &&
+                    currentDy > 0 // Ball moving down
+                ) {
+                     newDyDirection = -Math.abs(prevBall.dy);
+                     nextY = paddleTop - BALL_RADIUS; // Place ball exactly on top
+                     collisionHandled = true;
 
-                 const hitPosRatio = (nextX - (paddleLeft + PADDLE_WIDTH / 2)) / (PADDLE_WIDTH / 2);
-                 const clampedHitPosRatio = Math.max(-1, Math.min(1, hitPosRatio));
-                 const maxHorizontalFactor = 1.5;
-                 const baseSpeedX = INITIAL_BALL_SPEED_X;
-                 let calculatedDxDirection = clampedHitPosRatio * baseSpeedX * maxHorizontalFactor;
+                     // Paddle angle logic
+                     const hitPosRatio = (nextX - (paddleLeft + PADDLE_WIDTH / 2)) / (PADDLE_WIDTH / 2);
+                     const clampedHitPosRatio = Math.max(-1, Math.min(1, hitPosRatio));
+                     const maxHorizontalFactor = 1.5;
+                     const baseSpeedX = INITIAL_BALL_SPEED_X;
+                     let calculatedDxDirection = clampedHitPosRatio * baseSpeedX * maxHorizontalFactor;
 
-                 if (Math.abs(calculatedDxDirection) < minDxThreshold) {
-                    calculatedDxDirection = minDxThreshold * (clampedHitPosRatio >= 0 ? 1 : -1);
-                 }
+                     // Enforce minimum horizontal speed away from vertical
+                     if (Math.abs(calculatedDxDirection) < minDxThreshold) {
+                         calculatedDxDirection = minDxThreshold * (clampedHitPosRatio >= 0 ? 1 : -1);
+                         // Ensure the sign is correct even if clampedHitPosRatio was 0
+                         if (calculatedDxDirection === 0) calculatedDxDirection = minDxThreshold * (Math.random() > 0.5 ? 1 : -1);
+                     }
 
-                 const maxBaseDx = baseSpeedX * maxHorizontalFactor;
-                 newDxDirection = Math.max(-maxBaseDx, Math.min(maxBaseDx, calculatedDxDirection));
-                 newDxDirection = Math.abs(newDxDirection) * (newDxDirection >= 0 ? 1 : -1); // Ensure direction sign is kept
+                     // Cap the maximum horizontal speed change
+                     const maxBaseDx = baseSpeedX * maxHorizontalFactor;
+                     newDxDirection = Math.max(-maxBaseDx, Math.min(maxBaseDx, calculatedDxDirection));
 
+                }
             }
 
 
             // --- Tetris Brick Collision ---
-            let collisionHandled = false;
-            const gridXMin = Math.max(0, Math.floor(nextX - BALL_RADIUS));
-            const gridXMax = Math.min(TETRIS_WIDTH - 1, Math.floor(nextX + BALL_RADIUS));
-            const gridYMin = Math.max(0, Math.floor(nextY - BALL_RADIUS));
-            const gridYMax = Math.min(TETRIS_HEIGHT - 1, Math.floor(nextY + BALL_RADIUS));
+            if (!collisionHandled) { // Only check bricks if no other collision handled
+                const gridXMin = Math.max(0, Math.floor(nextX - BALL_RADIUS));
+                const gridXMax = Math.min(TETRIS_WIDTH - 1, Math.floor(nextX + BALL_RADIUS));
+                const gridYMin = Math.max(0, Math.floor(nextY - BALL_RADIUS));
+                const gridYMax = Math.min(TETRIS_HEIGHT - 1, Math.floor(nextY + BALL_RADIUS));
 
-            // Collision detection loop
-             brickLoop: // Label for breaking outer loop
-             for (let y = gridYMin; y <= gridYMax; y++) {
-                 for (let x = gridXMin; x <= gridXMax; x++) {
-                     if (mutableGrid[y]?.[x]?.[1] === 'merged') {
-                         const brickLeft = x;
-                         const brickRight = x + 1;
-                         const brickTop = y;
-                         const brickBottom = y + 1;
+                // Collision detection loop
+                brickLoop:
+                 for (let y = gridYMin; y <= gridYMax; y++) {
+                     for (let x = gridXMin; x <= gridXMax; x++) {
+                         if (mutableGrid[y]?.[x]?.[1] === 'merged') {
+                             const brickLeft = x;
+                             const brickRight = x + 1;
+                             const brickTop = y;
+                             const brickBottom = y + 1;
 
-                         const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
-                         const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
-                         const distX = nextX - closestX;
-                         const distY = nextY - closestY;
+                             const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
+                             const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
+                             const distX = nextX - closestX;
+                             const distY = nextY - closestY;
+                             const distSq = distX * distX + distY * distY;
 
-                         if ((distX * distX + distY * distY) < (BALL_RADIUS * BALL_RADIUS)) {
-                             // Collision occurred
-                             collisionHandled = true;
+                             if (distSq < (BALL_RADIUS * BALL_RADIUS)) {
+                                 // Collision occurred
+                                 collisionHandled = true;
 
-                             const penX = BALL_RADIUS - Math.abs(distX);
-                             const penY = BALL_RADIUS - Math.abs(distY);
+                                 // --- Determine Bounce Direction ---
+                                 // Calculate penetration depths
+                                 const penX = BALL_RADIUS - Math.abs(distX);
+                                 const penY = BALL_RADIUS - Math.abs(distY);
 
-                             if (penY < penX) { // Vertical collision is primary
-                                 const collisionNormalY = (distY > 0) ? 1 : -1;
-                                 nextY = (collisionNormalY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
-                                 newDyDirection = -prevBall.dy; // Reflect base dy direction
-                                 newDxDirection = prevBall.dx; // Keep base dx direction
+                                 // Simplified bounce logic: primarily bounce on the axis with less penetration
+                                 if (penY < penX) { // Vertical collision is primary
+                                     // Correct position vertically
+                                     nextY = (distY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
+                                     // Reflect vertical direction
+                                     newDyDirection = -prevBall.dy;
+                                     // Ensure minimum horizontal speed after vertical bounce
+                                      if (Math.abs(newDxDirection) < minDxThreshold) {
+                                          newDxDirection = minDxThreshold * (newDxDirection >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1);
+                                      }
 
-                                 if (Math.abs(newDxDirection) < minDxThreshold) {
-                                    newDxDirection = minDxThreshold * (newDxDirection >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1);
+                                 } else { // Horizontal collision is primary (or equal penetration)
+                                     // Correct position horizontally
+                                     nextX = (distX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
+                                     // Reflect horizontal direction
+                                     newDxDirection = -prevBall.dx;
                                  }
-                             } else { // Horizontal collision is primary
-                                 const collisionNormalX = (distX > 0) ? 1 : -1;
-                                 nextX = (collisionNormalX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
-                                 newDxDirection = -prevBall.dx; // Reflect base dx direction
-                                 newDyDirection = prevBall.dy; // Keep base dy direction
+
+
+                                 // Break the collided brick (only non-grey)
+                                 if (mutableGrid[y][x][0] !== 'G') {
+                                     mutableGrid[y][x] = [0, 'clear'];
+                                     brickBroken = true;
+                                 } else {
+                                    // If it's a grey brick, still bounce but don't break or add score
+                                     brickBroken = false; // Ensure flag is false
+                                 }
+
+
+                                 break brickLoop; // Exit both loops after handling one collision
                              }
-
-                             // Break the collided brick (ANY merged brick)
-                             mutableGrid[y][x] = [0, 'clear'];
-                             brickBroken = true;
-
-                             break brickLoop; // Break out of both loops
                          }
                      }
                  }
-             }
+            }
 
 
             // --- Post-Collision Updates ---
             if (brickBroken) {
-                setGrid(mutableGrid); // Update grid state only if a brick was broken
+                setGrid(mutableGrid); // Update grid state only if a non-grey brick was broken
                 setScore(prev => prev + BRICK_BREAK_SCORE);
             }
 
@@ -560,7 +589,8 @@ export const useTetroPongGame = () => {
         if (!isClient || !gameStarted || gameOver || isPaused) return; // Check pause state
         updatePongState();
         // Tetris drop is handled by its own interval (tetrisDropTime)
-    }, gameStarted && !gameOver ? GAME_TICK_MS : null);
+    }, gameStarted && !gameOver && !isPaused ? GAME_TICK_MS : null); // Add isPaused check
+
 
     // --- Tetris Auto Drop Interval ---
      useInterval(() => {
@@ -579,50 +609,74 @@ export const useTetroPongGame = () => {
         const downKey = keysPressed.current['arrowdown'];
 
         // Left movement
-        if (leftKey?.pressed && leftKey.repeatTimeout === null) {
-            leftKey.repeatTimeout = setInterval(() => {
-                movePlayer(-1);
-            }, MOVE_REPEAT_INTERVAL);
-        } else if (!leftKey?.pressed && leftKey?.repeatTimeout !== null) {
-            clearInterval(leftKey.repeatTimeout);
-            leftKey.repeatTimeout = null;
+        if (leftKey?.pressed && !leftKey.repeatTimeout) {
+             leftKey.repeatTimeout = setInterval(() => {
+                 // Ensure key is still pressed inside interval callback
+                 if (keysPressed.current['arrowleft']?.pressed) {
+                     movePlayer(-1);
+                 } else {
+                     // Clear interval if key was released between checks
+                     if(leftKey.repeatTimeout) clearInterval(leftKey.repeatTimeout);
+                     leftKey.repeatTimeout = null;
+                 }
+             }, MOVE_REPEAT_INTERVAL);
+        } else if (!leftKey?.pressed && leftKey?.repeatTimeout) {
+             clearInterval(leftKey.repeatTimeout);
+             leftKey.repeatTimeout = null;
         }
+
 
         // Right movement
-        if (rightKey?.pressed && rightKey.repeatTimeout === null) {
-            rightKey.repeatTimeout = setInterval(() => {
-                movePlayer(1);
-            }, MOVE_REPEAT_INTERVAL);
-        } else if (!rightKey?.pressed && rightKey?.repeatTimeout !== null) {
-            clearInterval(rightKey.repeatTimeout);
-            rightKey.repeatTimeout = null;
-        }
+         if (rightKey?.pressed && !rightKey.repeatTimeout) {
+             rightKey.repeatTimeout = setInterval(() => {
+                  if (keysPressed.current['arrowright']?.pressed) {
+                     movePlayer(1);
+                 } else {
+                      if(rightKey.repeatTimeout) clearInterval(rightKey.repeatTimeout);
+                     rightKey.repeatTimeout = null;
+                 }
+             }, MOVE_REPEAT_INTERVAL);
+         } else if (!rightKey?.pressed && rightKey?.repeatTimeout) {
+              clearInterval(rightKey.repeatTimeout);
+              rightKey.repeatTimeout = null;
+         }
 
         // Soft drop movement
-        if (downKey?.pressed && downKey.repeatTimeout === null) {
-            downKey.repeatTimeout = setInterval(() => {
-                dropPlayer(true); // Soft drop repeats
-            }, SOFT_DROP_REPEAT_INTERVAL);
-        } else if (!downKey?.pressed && downKey?.repeatTimeout !== null) {
-            clearInterval(downKey.repeatTimeout);
-            downKey.repeatTimeout = null;
-        }
+         if (downKey?.pressed && !downKey.repeatTimeout) {
+             downKey.repeatTimeout = setInterval(() => {
+                  if (keysPressed.current['arrowdown']?.pressed) {
+                     dropPlayer(true); // Soft drop repeats
+                 } else {
+                      if(downKey.repeatTimeout) clearInterval(downKey.repeatTimeout);
+                     downKey.repeatTimeout = null;
+                 }
+             }, SOFT_DROP_REPEAT_INTERVAL);
+         } else if (!downKey?.pressed && downKey?.repeatTimeout) {
+              clearInterval(downKey.repeatTimeout);
+              downKey.repeatTimeout = null;
+         }
+
 
         // Cleanup function to clear intervals on component unmount or pause/game over
         return () => {
-            if (leftKey?.repeatTimeout) clearInterval(leftKey.repeatTimeout);
-            if (rightKey?.repeatTimeout) clearInterval(rightKey.repeatTimeout);
-            if (downKey?.repeatTimeout) clearInterval(downKey.repeatTimeout);
-            // Ensure refs are updated on cleanup if necessary (or rely on handleKeyUp)
-             if (leftKey) leftKey.repeatTimeout = null;
-             if (rightKey) rightKey.repeatTimeout = null;
-             if (downKey) downKey.repeatTimeout = null;
+             // Use optional chaining for safety during cleanup
+             if (keysPressed.current['arrowleft']?.repeatTimeout) {
+                 clearInterval(keysPressed.current['arrowleft']!.repeatTimeout!);
+                 keysPressed.current['arrowleft']!.repeatTimeout = null;
+             }
+             if (keysPressed.current['arrowright']?.repeatTimeout) {
+                 clearInterval(keysPressed.current['arrowright']!.repeatTimeout!);
+                 keysPressed.current['arrowright']!.repeatTimeout = null;
+             }
+             if (keysPressed.current['arrowdown']?.repeatTimeout) {
+                 clearInterval(keysPressed.current['arrowdown']!.repeatTimeout!);
+                 keysPressed.current['arrowdown']!.repeatTimeout = null;
+             }
         };
     }, [
-        keysPressed.current['arrowleft']?.pressed,
-        keysPressed.current['arrowright']?.pressed,
-        keysPressed.current['arrowdown']?.pressed,
-        isPaused, gameOver, gameStarted, movePlayer, dropPlayer // Include movePlayer and dropPlayer
+        // Using direct access inside useEffect to avoid stale closures
+        // but listing dependencies that influence the logic
+        isPaused, gameOver, gameStarted, movePlayer, dropPlayer
     ]);
 
 
@@ -642,7 +696,7 @@ export const useTetroPongGame = () => {
                     // Clear movement intervals on pause
                      if (nextPaused) {
                         Object.values(keysPressed.current).forEach(keyState => {
-                            if (keyState.repeatTimeout) {
+                            if (keyState?.repeatTimeout) { // Check if keyState exists
                                 clearInterval(keyState.repeatTimeout);
                                 keyState.repeatTimeout = null;
                             }
@@ -677,12 +731,8 @@ export const useTetroPongGame = () => {
                  if (keyLower === 'arrowdown') dropPlayer(true); // Initial soft drop
 
                  // Set timeout for continuous move/drop AFTER initial action
-                 setTimeout(() => {
-                     // Check if the key is still pressed after the delay
-                     if (keysPressed.current[keyLower]?.pressed) {
-                         // Effect hook will handle setting up the interval
-                     }
-                 }, MOVE_REPEAT_DELAY);
+                 // The useEffect hook now handles setting up the interval
+                 // based on the 'pressed' state, so no need for setTimeout here.
              }
              handled = true;
          } else if (keyLower === 'arrowup') {
@@ -712,12 +762,14 @@ export const useTetroPongGame = () => {
         const keyLower = event.key.toLowerCase();
 
         if (keysPressed.current[keyLower]) {
+             // Clear the interval directly if it exists
              if (keysPressed.current[keyLower].repeatTimeout) {
                  clearInterval(keysPressed.current[keyLower].repeatTimeout!);
              }
-            keysPressed.current[keyLower].pressed = false;
-            keysPressed.current[keyLower].firstPressTime = null;
-            keysPressed.current[keyLower].repeatTimeout = null;
+            // Update the state in the ref
+             keysPressed.current[keyLower].pressed = false;
+             keysPressed.current[keyLower].firstPressTime = null;
+             keysPressed.current[keyLower].repeatTimeout = null;
         }
 
     }, [isClient]); // Removed unnecessary dependencies
@@ -733,7 +785,7 @@ export const useTetroPongGame = () => {
              window.removeEventListener('keydown', handleKeyDown);
              window.removeEventListener('keyup', handleKeyUp);
              Object.values(keysPressed.current).forEach(keyState => {
-                 if (keyState.repeatTimeout) {
+                 if (keyState?.repeatTimeout) { // Check if keyState exists
                      clearInterval(keyState.repeatTimeout);
                  }
              });
@@ -748,7 +800,7 @@ export const useTetroPongGame = () => {
 
         // Clear any existing intervals/timeouts from previous game state
          Object.values(keysPressed.current).forEach(keyState => {
-             if (keyState.repeatTimeout) {
+             if (keyState?.repeatTimeout) { // Check if keyState exists
                  clearInterval(keyState.repeatTimeout);
              }
          });
@@ -761,7 +813,7 @@ export const useTetroPongGame = () => {
         setGameOver(false); // Reset game over flag
         setBall({ // Reset ball state
             ...baseInitialBallState,
-            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1),
+            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1), // Randomize initial X direction
             dy: INITIAL_BALL_SPEED_Y,
         });
         setPaddle(baseInitialPaddleState); // Reset paddle state
@@ -777,9 +829,11 @@ export const useTetroPongGame = () => {
             console.error("Game over immediately on start - spawn collision?");
             setGameStarted(false);
             setGameOver(true);
+            setTetrisDropTime(null); // Ensure timer is null if game over on start
         } else {
              // Explicitly set drop time if resetPlayer succeeded and game started
-             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / 1); // Use initial speed multiplier (1)
+             // Use the initial speed multiplier (1) for the first drop interval
+             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / 1);
              setTetrisDropTime(initialDropTime);
         }
 
@@ -814,5 +868,3 @@ export const useTetroPongGame = () => {
         paddleY: PADDLE_Y,
     };
 };
-
-    
