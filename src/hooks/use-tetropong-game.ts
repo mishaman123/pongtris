@@ -72,15 +72,9 @@ export const useTetroPongGame = () => {
 
     const keysPressed = useRef<{ [key: string]: boolean }>({});
 
-    // Calculate speed multiplier based on score
+    // Calculate speed multiplier based on score (cumulative 5% increase per 20 points)
     const speedMultiplier = useMemo(() => {
-        // Calculate the number of 20-point increments achieved.
         const levels = Math.floor(score / 20);
-        // Apply a cumulative 5% increase for each level.
-        // Example: Score 0-19 (level 0): 1.00x
-        // Score 20-39 (level 1): 1.05x
-        // Score 40-59 (level 2): 1.05 * 1.05 = 1.1025x
-        // Score 60-79 (level 3): 1.05 * 1.05 * 1.05 = 1.1576x
         return Math.pow(1.05, levels);
     }, [score]);
 
@@ -236,12 +230,14 @@ export const useTetroPongGame = () => {
         // Check collision one step below using the Tetris-specific check
         if (!checkTetrisCollision(player, grid, { x: 0, y: 1 })) {
              setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: prev.pos.y + 1 } }));
+             // Optionally reset drop timer here if soft drop should speed up next auto-drop
+             // setTetrisDropTime(Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier));
         } else {
             // If collision detected below (within Tetris bounds), mark as collided
              setPlayer(prev => ({ ...prev, collided: true }));
              setTetrisDropTime(null); // Stop the interval when piece lands at its final spot
         }
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused, speedMultiplier]); // Add speedMultiplier dependency if resetting timer
 
 
     const hardDropPlayer = useCallback(() => {
@@ -507,14 +503,15 @@ export const useTetroPongGame = () => {
                                  brickBroken = true;
 
                                  // Use flag to break after handling collision
-                                 gotoCollisionEnd();
+                                 // This 'goto' logic is replaced with a flag
+                                 break; // Break inner loop (x)
                              }
                          }
                     }
                 }
+                if (collisionHandled) break; // Break outer loop (y) if collision was handled
             }
 
-            function gotoCollisionEnd() {} // Label target
 
             // --- Post-Collision Updates ---
             if (brickBroken) {
@@ -601,37 +598,37 @@ export const useTetroPongGame = () => {
                  movePlayer(1);
                  keysPressed.current[key] = true; // Mark as pressed
                  handled = true;
-             } else if (key === 'ArrowDown') {
-                  hardDropPlayer(); // Changed Space to ArrowDown for hard drop
+             } else if (key === 'ArrowDown') { // Soft drop (move down one step)
+                  dropPlayer();
                   keysPressed.current[key] = true; // Mark as pressed
                   handled = true;
              } else if (key === 'ArrowUp') {
                   playerRotate(); // Rotate clockwise
                   keysPressed.current[key] = true; // Mark as pressed
                   handled = true;
+             } else if (key === ' ') { // Hard drop
+                 hardDropPlayer();
+                 keysPressed.current[key] = true; // Mark as pressed
+                 handled = true;
              }
-             // Removed Space bar control
-             // else if (key === ' ') { ... }
         }
-        // Soft drop - allow holding down, but not a dedicated key here anymore
+
 
         if (handled) {
              event.preventDefault(); // Prevent default browser actions (e.g., scrolling)
         }
 
-    }, [gameOver, gameStarted, isPaused, movePlayer, hardDropPlayer, playerRotate, isClient, tetrisDropTime]); // Added isPaused
+    }, [gameOver, gameStarted, isPaused, movePlayer, hardDropPlayer, playerRotate, dropPlayer, isClient]); // Added dropPlayer, isPaused
 
     const handleKeyUp = useCallback((event: KeyboardEvent) => {
          if (!isClient) return;
         const { key } = event;
         // Clear the pressed state for all keys on keyup
         delete keysPressed.current[key.toLowerCase()]; // For continuous controls (a, s)
-        delete keysPressed.current[key]; // For discrete controls (Arrows, p)
+        delete keysPressed.current[key]; // For discrete controls (Arrows, p, Space)
 
-         // No need to reset soft drop speed as ArrowDown is now hard drop
-         // if (key === 'ArrowDown' && ... ) { ... }
+    }, [isClient]); // Removed unnecessary dependencies
 
-    }, [isClient, score, gameStarted, gameOver, player.collided, tetrisDropTime, speedMultiplier, isPaused]); // Added isPaused
 
      // Attach event listeners only on the client
      useEffect(() => {
@@ -692,3 +689,4 @@ export const useTetroPongGame = () => {
         paddleY: PADDLE_Y,
     };
 };
+

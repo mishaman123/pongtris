@@ -32,7 +32,7 @@ export default function Home() {
        {/* Controls Overlay - Top Right */}
        <div className="absolute top-4 right-4 text-right text-xs text-muted-foreground bg-card/80 p-2 rounded-md shadow">
           <h4 className="font-semibold mb-1 text-sm text-primary-foreground">Controls</h4>
-          <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Down: Hard Drop)</p>
+          <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Down: Soft Drop, L/R: Move), Space: Hard Drop</p>
           <p><span className="font-semibold">Pong:</span> A (Left), S (Right)</p>
           <p><span className="font-semibold">Game:</span> P (Pause)</p>
        </div>
@@ -93,3 +93,4 @@ export default function Home() {
     </div>
   );
 }
+
