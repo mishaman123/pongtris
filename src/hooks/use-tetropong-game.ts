@@ -57,6 +57,7 @@ const baseInitialPaddleState: Paddle = {
 
 const GAME_TICK_MS = 50; // Update game state approx 20 times per second
 const TETRIS_DROP_INTERVAL_INITIAL = 800; // Milliseconds
+const MIN_VERTICAL_BOUNCE_ANGLE_DEG = 2; // Minimum angle from vertical after bounce
 
 export const useTetroPongGame = () => {
     const [player, setPlayer] = useState<Player>(baseInitialPlayerState);
@@ -72,11 +73,18 @@ export const useTetroPongGame = () => {
 
     const keysPressed = useRef<{ [key: string]: boolean }>({});
 
-    // Calculate speed multiplier based on score (cumulative 5% increase per 20 points)
+    // Calculate speed multiplier based on score (cumulative 5% increase per 12 points)
     const speedMultiplier = useMemo(() => {
-        const levels = Math.floor(score / 20);
+        const levels = Math.floor(score / 12); // Change from 20 to 12
         return Math.pow(1.05, levels);
     }, [score]);
+
+    // Minimum horizontal speed derived from minimum angle and base speed
+    const minDxThreshold = useMemo(() => {
+        const angleRad = MIN_VERTICAL_BOUNCE_ANGLE_DEG * (Math.PI / 180);
+        const baseSpeedY = INITIAL_BALL_SPEED_Y; // Use base speed for threshold calculation consistency
+        return Math.abs(baseSpeedY * Math.tan(angleRad));
+    }, []);
 
 
     useEffect(() => {
@@ -386,20 +394,31 @@ export const useTetroPongGame = () => {
             let brickBroken = false;
             let mutableGrid = grid.map(row => [...row]); // Create mutable copy for potential brick break
 
+            // Apply speed multiplier to velocity just before calculating next position
+            const currentDx = prevBall.dx * speedMultiplier;
+            const currentDy = prevBall.dy * speedMultiplier;
+            nextX = prevBall.x + currentDx;
+            nextY = prevBall.y + currentDy;
+
+
             // --- Boundary Collisions ---
             // Left/Right Walls
             if (nextX - BALL_RADIUS < 0) {
-                newDx = Math.abs(newDx); // Bounce right
+                newDx = Math.abs(prevBall.dx); // Use original dx direction for bounce logic
                 nextX = BALL_RADIUS; // Adjust position
             } else if (nextX + BALL_RADIUS > GAME_WIDTH) {
-                newDx = -Math.abs(newDx); // Bounce left
+                newDx = -Math.abs(prevBall.dx); // Use original dx direction
                 nextX = GAME_WIDTH - BALL_RADIUS; // Adjust position
             }
 
             // Top Wall (ceiling) - Bounce off y=0
-            if (nextY - BALL_RADIUS < 0 && prevBall.dy < 0) { // Only bounce if moving up
-                newDy = Math.abs(newDy); // Bounce down
+            if (nextY - BALL_RADIUS < 0 && currentDy < 0) { // Check current effective direction
+                newDy = Math.abs(prevBall.dy); // Use original dy direction
                 nextY = BALL_RADIUS; // Adjust position
+                 // Prevent near-vertical bounce: ensure minimum horizontal speed
+                 if (Math.abs(newDx) < minDxThreshold) {
+                     newDx = minDxThreshold * (newDx >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1); // Add small random horizontal kick
+                 }
             }
 
             // --- Paddle Collision ---
@@ -413,26 +432,30 @@ export const useTetroPongGame = () => {
                 nextY - BALL_RADIUS < paddleBottom && // Ball's top edge is above paddle bottom
                 nextX + BALL_RADIUS > paddleLeft && // Ball's right edge is right of paddle left
                 nextX - BALL_RADIUS < paddleRight && // Ball's left edge is left of paddle right
-                prevBall.dy > 0 // Ensure ball is moving downwards
+                currentDy > 0 // Ensure ball is moving downwards effectively
             ) {
-                 // Apply speed multiplier to base speed on bounce
-                 const baseSpeedX = INITIAL_BALL_SPEED_X;
-                 const baseSpeedY = INITIAL_BALL_SPEED_Y;
-                 const currentSpeedMagnitudeX = baseSpeedX * speedMultiplier;
-                 const currentSpeedMagnitudeY = baseSpeedY * speedMultiplier;
-
-                 newDy = -Math.abs(currentSpeedMagnitudeY); // Bounce up with current speed
+                 // Bounce uses the base speed directions but applies multiplier implicitly in next tick
+                 newDy = -Math.abs(prevBall.dy); // Reverse original vertical direction
                  nextY = paddleTop - BALL_RADIUS; // Place ball exactly on top of paddle
 
                  // Adjust horizontal speed based on hit position on paddle
                  const hitPosRatio = (nextX - (paddleLeft + PADDLE_WIDTH / 2)) / (PADDLE_WIDTH / 2);
                  const clampedHitPosRatio = Math.max(-1, Math.min(1, hitPosRatio));
                  const maxHorizontalFactor = 1.5; // Angle variation
-                 newDx = clampedHitPosRatio * currentSpeedMagnitudeX * maxHorizontalFactor;
+                 const baseSpeedX = INITIAL_BALL_SPEED_X; // Use base speed for angle calculation consistency
+                 let calculatedDx = clampedHitPosRatio * baseSpeedX * maxHorizontalFactor;
 
-                  // Simple speed limit to prevent extreme horizontal speeds after angle adjustment
-                  const maxDx = currentSpeedMagnitudeX * maxHorizontalFactor;
-                  newDx = Math.max(-maxDx, Math.min(maxDx, newDx));
+                 // Prevent near-vertical bounce from paddle
+                 if (Math.abs(calculatedDx) < minDxThreshold) {
+                    calculatedDx = minDxThreshold * (clampedHitPosRatio >= 0 ? 1 : -1);
+                 }
+
+                 // Apply direction based on calculation but maintain base magnitude for next tick scaling
+                 newDx = Math.abs(calculatedDx) * (calculatedDx >= 0 ? 1 : -1);
+                 // Simple speed limit check based on base speed and factor (will be scaled next tick)
+                 const maxBaseDx = baseSpeedX * maxHorizontalFactor;
+                 newDx = Math.max(-maxBaseDx, Math.min(maxBaseDx, newDx));
+
             }
 
 
@@ -485,25 +508,30 @@ export const useTetroPongGame = () => {
                                      collisionNormalX = 0;
                                      // Correct position: Move ball out along the normal
                                      nextY = (collisionNormalY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
-                                     // Reflect velocity
+                                     // Reflect velocity (using original direction)
                                      newDy = -prevBall.dy;
-                                     newDx = prevBall.dx; // Keep horizontal velocity
+                                     newDx = prevBall.dx; // Keep horizontal velocity direction
+
+                                     // Prevent near-vertical bounce off brick
+                                     if (Math.abs(newDx) < minDxThreshold) {
+                                         newDx = minDxThreshold * (newDx >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1);
+                                     }
+
                                  } else { // Horizontal collision
                                      collisionNormalX = (distX > 0) ? 1 : -1;
                                      collisionNormalY = 0;
                                      // Correct position
                                      nextX = (collisionNormalX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
-                                     // Reflect velocity
+                                     // Reflect velocity (using original direction)
                                      newDx = -prevBall.dx;
-                                     newDy = prevBall.dy; // Keep vertical velocity
+                                     newDy = prevBall.dy; // Keep vertical velocity direction
                                  }
 
                                  // Break the collided brick (ANY merged brick, including 'G')
                                  mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
                                  brickBroken = true;
 
-                                 // Use flag to break after handling collision
-                                 // This 'goto' logic is replaced with a flag
+                                 // Break after handling the first collision found
                                  break; // Break inner loop (x)
                              }
                          }
@@ -534,10 +562,12 @@ export const useTetroPongGame = () => {
             nextY = Math.max(BALL_RADIUS, Math.min(nextY, GAME_HEIGHT - BALL_RADIUS)); // Clamp top and bottom
 
 
+             // Return the updated state, using the modified base speeds (directions)
+             // The speed multiplier will be applied again at the start of the next updatePongState call
             return { x: nextX, y: nextY, dx: newDx, dy: newDy };
         });
 
-    }, [paddle.x, grid, score, speedMultiplier, isPaused]); // Add isPaused
+    }, [paddle.x, grid, score, speedMultiplier, isPaused, minDxThreshold]); // Add isPaused, minDxThreshold
 
 
     // --- Game Loop ---
@@ -649,11 +679,12 @@ export const useTetroPongGame = () => {
         setGrid(createEmptyGrid()); // createEmptyGrid now adds grey blocks
         setIsPaused(false); // Ensure game is not paused on start/restart
         // Initialize ball speed with the base multiplier (which is 1 at score 0)
-        const initialSpeedMult = 1;
+        const initialSpeedMult = 1; // At score 0, multiplier is 1
         setBall({
             ...baseInitialBallState,
-            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1) * initialSpeedMult,
-            dy: INITIAL_BALL_SPEED_Y * initialSpeedMult,
+             // Start with base speed, multiplier applies in updatePongState
+            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1),
+            dy: INITIAL_BALL_SPEED_Y,
         });
         setPaddle(baseInitialPaddleState);
         setGameOver(false);
