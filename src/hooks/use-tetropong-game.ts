@@ -460,8 +460,8 @@ export const useTetroPongGame = () => {
             // --- Collision Detection & Resolution Loop ---
             for (let y = gridYMin; y <= gridYMax; y++) {
                 for (let x = gridXMin; x <= gridXMax; x++) {
-                     // Check if the cell exists and is a 'merged' Tetris block (and not grey 'G')
-                     if (mutableGrid[y]?.[x]?.[1] === 'merged' && mutableGrid[y]?.[x]?.[0] !== 'G') {
+                     // Check if the cell exists and is a 'merged' block
+                     if (mutableGrid[y]?.[x]?.[1] === 'merged') {
                          const brickLeft = x;
                          const brickRight = x + 1;
                          const brickTop = y;
@@ -507,11 +507,10 @@ export const useTetroPongGame = () => {
                                      newDy = prevBall.dy; // Keep vertical velocity
                                  }
 
-                                 // Break the collided brick (if not grey)
-                                 if (mutableGrid[collidedBrickY]?.[collidedBrickX]?.[0] !== 'G') {
-                                     mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
-                                     brickBroken = true;
-                                 }
+                                 // Break the collided brick (ANY merged brick)
+                                 mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
+                                 brickBroken = true;
+
 
                                  // Use goto-like break (exit both loops)
                                  gotoCollisionEnd(); // Exit loops after handling one collision
