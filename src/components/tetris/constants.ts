@@ -19,8 +19,18 @@ export type Player = {
   collided: boolean;
 };
 
-export const createEmptyGrid = (): TetrisGrid =>
-  Array.from(Array(TOTAL_GRID_HEIGHT), () => Array(TETRIS_WIDTH).fill([0, 'clear']));
+export const createEmptyGrid = (): TetrisGrid => {
+  const grid = Array.from(Array(TOTAL_GRID_HEIGHT), () => Array(TETRIS_WIDTH).fill([0, 'clear']));
+
+  // Initialize bottom 3 rows of the Tetris area with grey blocks
+  for (let y = TETRIS_HEIGHT - 3; y < TETRIS_HEIGHT; y++) {
+    for (let x = 0; x < TETRIS_WIDTH; x++) {
+      grid[y][x] = ['G', 'merged']; // 'G' for Grey, initially 'merged'
+    }
+  }
+  return grid;
+};
+
 
 // Define colors using theme variables for consistency
 export const TETROMINOS: { [key: string]: TetrisPiece } = {
@@ -81,6 +91,10 @@ export const TETROMINOS: { [key: string]: TetrisPiece } = {
     ],
     color: 'bg-red-500', // Example specific color
   },
+  G: { // Grey block definition
+    shape: [['G']], // Single block shape
+    color: 'bg-muted', // Use muted color from theme
+  },
 };
 
 
@@ -93,3 +107,4 @@ export const getRandomTetromino = (): { type: string; piece: TetrisPiece } => {
 // Scoring for line clears
 export const LINE_POINTS = [0, 4, 10, 30, 120]; // 0, 1, 2, 3, 4 lines
 export const BRICK_BREAK_SCORE = 1;
+

@@ -3,7 +3,6 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useInterval } from './use-interval';
-import { useEventListener } from './use-event-listener';
 import {
     TETRIS_WIDTH,
     TETRIS_HEIGHT,
@@ -38,21 +37,21 @@ export type Paddle = {
     x: number; // position in grid units
 };
 
-const initialPlayerState: Player = {
+const baseInitialPlayerState: Player = {
     pos: { x: TETRIS_WIDTH / 2 - 1, y: 0 },
     tetromino: TETROMINOS[0].shape,
     pieceType: 0,
     collided: false,
 };
 
-const initialBallState: Ball = {
+const baseInitialBallState: Ball = {
     x: GAME_WIDTH / 2,
-    y: GAME_HEIGHT / 2, // Start ball in the middle of the whole grid
+    y: TETRIS_HEIGHT + 2, // Start ball below Tetris grid but within Pong area
     dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1),
     dy: INITIAL_BALL_SPEED_Y,
 };
 
-const initialPaddleState: Paddle = {
+const baseInitialPaddleState: Paddle = {
     x: (GAME_WIDTH - PADDLE_WIDTH) / 2,
 };
 
@@ -60,10 +59,10 @@ const GAME_TICK_MS = 50; // Update game state approx 20 times per second
 const TETRIS_DROP_INTERVAL_INITIAL = 800; // Milliseconds
 
 export const useTetroPongGame = () => {
-    const [player, setPlayer] = useState<Player>(initialPlayerState);
+    const [player, setPlayer] = useState<Player>(baseInitialPlayerState);
     const [grid, setGrid] = useState<TetrisGrid>(createEmptyGrid());
-    const [ball, setBall] = useState<Ball>(initialBallState);
-    const [paddle, setPaddle] = useState<Paddle>(initialPaddleState);
+    const [ball, setBall] = useState<Ball>(baseInitialBallState);
+    const [paddle, setPaddle] = useState<Paddle>(baseInitialPaddleState);
     const [score, setScore] = useState(0);
     const [gameOver, setGameOver] = useState(false);
     const [gameStarted, setGameStarted] = useState(false);
@@ -71,6 +70,12 @@ export const useTetroPongGame = () => {
     const [isClient, setIsClient] = useState(false); // For hydration safety
 
     const keysPressed = useRef<{ [key: string]: boolean }>({});
+
+    // Calculate speed multiplier based on score
+    const speedMultiplier = useMemo(() => {
+        const levels = Math.floor(score / 20);
+        return 1 + levels * 0.05;
+    }, [score]);
 
     useEffect(() => {
         setIsClient(true); // Component has mounted, safe to use browser APIs
@@ -85,11 +90,14 @@ export const useTetroPongGame = () => {
                     const nextY = y + p.pos.y + move.y;
                     const nextX = x + p.pos.x + move.x;
 
+                    // Collision conditions:
+                    // 1. Out of bounds horizontally
+                    // 2. Hit the Tetris floor (y >= TETRIS_HEIGHT)
+                    // 3. Hit a 'merged' block within the Tetris area (0 <= y < TETRIS_HEIGHT)
                     if (
-                        nextY >= TETRIS_HEIGHT || // Check Tetris floor bounds specifically
                         nextX < 0 ||
                         nextX >= TETRIS_WIDTH ||
-                        // Check for merged blocks ONLY within the Tetris area
+                        nextY >= TETRIS_HEIGHT ||
                         (nextY >= 0 && g[nextY]?.[nextX]?.[1] === 'merged')
                     ) {
                         return true;
@@ -140,7 +148,7 @@ export const useTetroPongGame = () => {
         const tempGrid = grid.map(row => [...row]); // Ensure it's a copy
 
         // Check collision at spawn position using the Tetris-specific height
-        if (checkTetrisCollision({ ...initialPlayerState, pos: newPlayerPos, tetromino: piece.shape, pieceType: type }, tempGrid, { x: 0, y: 0 })) {
+        if (checkTetrisCollision({ ...baseInitialPlayerState, pos: newPlayerPos, tetromino: piece.shape, pieceType: type }, tempGrid, { x: 0, y: 0 })) {
             setGameOver(true);
             setGameStarted(false);
             setTetrisDropTime(null);
@@ -154,8 +162,11 @@ export const useTetroPongGame = () => {
                 pieceType: type,
                 collided: false,
             });
+             // Reset drop time based on current speed multiplier when a new piece starts
+            const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
+            setTetrisDropTime(nextDropTime);
         }
-    }, [grid, checkTetrisCollision]); // grid dependency is needed
+    }, [grid, checkTetrisCollision, speedMultiplier]); // grid and speedMultiplier dependency is needed
 
     const rotate = (matrix: TetrisPieceShape): TetrisPieceShape => {
         // Transpose
@@ -165,7 +176,7 @@ export const useTetroPongGame = () => {
     };
 
     const playerRotate = useCallback(() => {
-        if (player.collided || player.pieceType === 'O') return; // Don't rotate if collided or 'O' piece
+        if (player.collided || player.pieceType === 'O' || gameOver || !gameStarted) return; // Don't rotate if collided, 'O' piece, or game not active
 
         const clonedPlayer = JSON.parse(JSON.stringify(player));
         clonedPlayer.tetromino = rotate(clonedPlayer.tetromino);
@@ -200,19 +211,19 @@ export const useTetroPongGame = () => {
               }
         }
         setPlayer(clonedPlayer);
-    }, [player, grid, checkTetrisCollision]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
 
 
     const movePlayer = useCallback((dir: number) => {
-         if (player.collided) return; // Prevent movement after collision
+         if (player.collided || gameOver || !gameStarted) return; // Prevent movement after collision or if game not active
          // Use Tetris-specific collision check
         if (!checkTetrisCollision(player, grid, { x: dir, y: 0 })) {
             setPlayer(prev => ({ ...prev, pos: { ...prev.pos, x: prev.pos.x + dir } }));
         }
-    }, [player, grid, checkTetrisCollision]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
 
     const dropPlayer = useCallback(() => {
-        if (player.collided) return; // Prevent dropping after collision detected
+        if (player.collided || gameOver || !gameStarted) return; // Prevent dropping if collided or game not active
         // Check collision one step below using the Tetris-specific check
         if (!checkTetrisCollision(player, grid, { x: 0, y: 1 })) {
              setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: prev.pos.y + 1 } }));
@@ -221,11 +232,11 @@ export const useTetroPongGame = () => {
              setPlayer(prev => ({ ...prev, collided: true }));
              setTetrisDropTime(null); // Stop the interval when piece lands at its final spot
         }
-    }, [player, grid, checkTetrisCollision]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
 
 
     const hardDropPlayer = useCallback(() => {
-       if (gameOver || player.collided) return;
+       if (gameOver || player.collided || !gameStarted) return;
         let newY = player.pos.y;
         // Use checkTetrisCollision which now respects TETRIS_HEIGHT
         while (!checkTetrisCollision(player, grid, { x: 0, y: newY - player.pos.y + 1 })) {
@@ -234,7 +245,7 @@ export const useTetroPongGame = () => {
         // Set position to the lowest possible point and mark as collided
         setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: newY }, collided: true }));
         setTetrisDropTime(null); // Stop the interval immediately
-    }, [player, grid, checkTetrisCollision, gameOver]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
 
 
      // --- Merge and Line Clear ---
@@ -263,11 +274,22 @@ export const useTetroPongGame = () => {
                          } else if (newGrid[gridY]?.[gridX]?.[1] === 'merged') {
                              // This case implies an overlap occurred despite collision checks - likely a bug or edge case
                              console.warn(`Merge Overlap: Trying to merge onto existing merged block at [${gridX}, ${gridY}]`);
+                             // Potentially game over if merging onto existing block is illegal
+                             setGameOver(true);
+                             return; // Exit early if game over
                          }
+                    } else if (gridY < 0 && gridX >=0 && gridX < TETRIS_WIDTH) {
+                        // Handle case where part of the piece is above the grid after hard drop/rotation
+                        // This might indicate game over if it's the final resting place
+                        console.log("Piece merged partially or fully above grid top.");
+                        setGameOver(true); // Game over if piece locks above grid
+                        return;
                     }
                 }
             });
         });
+
+         if (gameOver) return; // Re-check game over status after potential overlap check
 
         // --- Line Clearing ---
         let clearedLines = 0;
@@ -275,11 +297,11 @@ export const useTetroPongGame = () => {
         // Iterate from bottom of Tetris area up to top (y = TETRIS_HEIGHT - 1 down to 0)
         for (let y = TETRIS_HEIGHT - 1; y >= 0; y--) {
              const row = newGrid[y];
-             // Check if the row is entirely filled with 'merged' blocks
-             if (row.every(cell => cell[1] === 'merged')) {
+             // Check if the row is entirely filled with 'merged' blocks AND does not contain any 'G' (grey) blocks
+             if (row.every(cell => cell[1] === 'merged' && cell[0] !== 'G')) {
                  clearedLines++;
              } else {
-                 sweptGrid.unshift(row); // Keep rows that are not full
+                 sweptGrid.unshift(row); // Keep rows that are not full or contain grey blocks
              }
         }
 
@@ -297,27 +319,26 @@ export const useTetroPongGame = () => {
 
         if (clearedLines > 0) {
              const pointsEarned = LINE_POINTS[clearedLines] || 0;
-             const newScore = score + pointsEarned;
-             setScore(newScore);
-             // Speed up Tetris drop based on the NEW score
-             const speedFactor = Math.floor(newScore / 50); // Example scoring threshold for speed increase
-             const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL - speedFactor * 50);
-             setTetrisDropTime(nextDropTime);
-        } else {
-             // If no lines cleared, ensure drop time is still based on current score
-             const speedFactor = Math.floor(score / 50);
-             const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL - speedFactor * 50);
-             setTetrisDropTime(nextDropTime);
+             setScore(prevScore => prevScore + pointsEarned);
+             // Speed update happens via useEffect watching score
         }
 
         setGrid(sweptGrid); // Update the grid state
 
          // Reset player AFTER grid update and score calculation
-         // Crucially, pass the newly updated sweptGrid to resetPlayer's collision check
          resetPlayer();
 
 
     }, [player, grid, resetPlayer, score, gameOver]); // Dependencies: player, grid, resetPlayer, score, gameOver
+
+    // Effect to update Tetris drop speed when speedMultiplier changes
+    useEffect(() => {
+        if (gameStarted && !gameOver && !player.collided && tetrisDropTime !== null) {
+            const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
+            setTetrisDropTime(nextDropTime);
+        }
+    }, [speedMultiplier, gameStarted, gameOver, player.collided, tetrisDropTime]); // Run when speedMultiplier or game state changes
+
 
     // Effect to handle piece collision and merging logic AFTER state update
     useEffect(() => {
@@ -335,14 +356,15 @@ export const useTetroPongGame = () => {
 
     // --- Pong Logic ---
     const updatePongState = useCallback(() => {
-         // Update Paddle Position
+         // Update Paddle Position (apply speed multiplier)
          setPaddle(prevPaddle => {
            let newX = prevPaddle.x;
+           const currentPaddleSpeed = PADDLE_SPEED * speedMultiplier; // Apply multiplier
            if (keysPressed.current['a']) { // Check lowercase only
-             newX -= PADDLE_SPEED;
+             newX -= currentPaddleSpeed;
            }
            if (keysPressed.current['s']) { // Check lowercase only
-             newX += PADDLE_SPEED;
+             newX += currentPaddleSpeed;
            }
            // Clamp paddle position within court bounds
            newX = Math.max(0, Math.min(newX, GAME_WIDTH - PADDLE_WIDTH));
@@ -387,83 +409,123 @@ export const useTetroPongGame = () => {
                 nextX - BALL_RADIUS < paddleRight && // Ball's left edge is left of paddle right
                 prevBall.dy > 0 // Ensure ball is moving downwards
             ) {
-                 newDy = -Math.abs(newDy); // Bounce upwards reliably
+                 // Apply speed multiplier to base speed on bounce
+                 const baseSpeed = Math.sqrt(INITIAL_BALL_SPEED_X**2 + INITIAL_BALL_SPEED_Y**2);
+                 const currentSpeedMagnitude = baseSpeed * speedMultiplier;
+
+                 newDy = -Math.abs(INITIAL_BALL_SPEED_Y); // Use initial Y speed magnitude for consistent bounce angle base
                  nextY = paddleTop - BALL_RADIUS; // Place ball exactly on top of paddle
 
                  // Adjust horizontal speed based on hit position on paddle
                  const hitPosRatio = (nextX - (paddleLeft + PADDLE_WIDTH / 2)) / (PADDLE_WIDTH / 2);
                  const clampedHitPosRatio = Math.max(-1, Math.min(1, hitPosRatio));
-                 const maxHorizontalFactor = 1.5;
+                 const maxHorizontalFactor = 1.5; // Angle variation
                  newDx = clampedHitPosRatio * Math.abs(INITIAL_BALL_SPEED_X) * maxHorizontalFactor;
 
-                 // Prevent ball from having near-zero horizontal speed
-                 const minHorizontalSpeed = INITIAL_BALL_SPEED_X * 0.2;
-                 if (Math.abs(newDx) < minHorizontalSpeed) {
-                    newDx = (newDx >= 0 ? 1 : -1) * minHorizontalSpeed;
+                 // Normalize and scale velocity vector to the current speed magnitude
+                 const bounceMagnitude = Math.sqrt(newDx**2 + newDy**2);
+                 if (bounceMagnitude > 0) {
+                    newDx = (newDx / bounceMagnitude) * currentSpeedMagnitude;
+                    newDy = (newDy / bounceMagnitude) * currentSpeedMagnitude;
+                 } else {
+                     // Handle zero magnitude case (e.g., direct center hit) - assign vertical bounce
+                     newDx = 0;
+                     newDy = -currentSpeedMagnitude;
+                 }
+
+                 // Prevent ball from having too slow horizontal speed after angle adjustment
+                 const minHorizontalRatio = 0.2;
+                 if (Math.abs(newDx) < Math.abs(INITIAL_BALL_SPEED_X * speedMultiplier * minHorizontalRatio)) {
+                    newDx = Math.sign(newDx || (Math.random() > 0.5 ? 1 : -1)) * Math.abs(INITIAL_BALL_SPEED_X * speedMultiplier * minHorizontalRatio);
+                    // Recalculate dy to maintain magnitude (optional, could just keep newDy)
+                    const remainingDySq = currentSpeedMagnitude**2 - newDx**2;
+                    newDy = -Math.sqrt(Math.max(0, remainingDySq)); // Bounce up
                  }
             }
 
 
             // --- Tetris Brick Collision ---
             let collisionHandled = false;
-             // Check cells around the ball's next position, ONLY within TETRIS_HEIGHT bounds (y < TETRIS_HEIGHT)
+            // Check cells around the ball's next position, ONLY within TETRIS_HEIGHT bounds (y < TETRIS_HEIGHT)
             const gridXMin = Math.max(0, Math.floor(nextX - BALL_RADIUS));
             const gridXMax = Math.min(TETRIS_WIDTH - 1, Math.floor(nextX + BALL_RADIUS));
-             // Check from y=0 up to just below TETRIS_HEIGHT
+            // Check from y=0 up to just below TETRIS_HEIGHT
             const gridYMin = Math.max(0, Math.floor(nextY - BALL_RADIUS));
             const gridYMax = Math.min(TETRIS_HEIGHT - 1, Math.floor(nextY + BALL_RADIUS));
 
+            let collidedBrickX = -1, collidedBrickY = -1;
+            let minCollisionTime = Infinity;
+            let collisionNormalX = 0, collisionNormalY = 0;
 
-            for (let y = gridYMin; y <= gridYMax && !collisionHandled; y++) {
-                // No need to check y < 0, loop starts at 0
-                for (let x = gridXMin; x <= gridXMax && !collisionHandled; x++) {
-                     // Check if the cell exists and is a 'merged' Tetris block
-                     if (mutableGrid[y]?.[x]?.[1] === 'merged') {
+
+            for (let y = gridYMin; y <= gridYMax; y++) {
+                for (let x = gridXMin; x <= gridXMax; x++) {
+                     // Check if the cell exists and is a 'merged' Tetris block (and not grey 'G')
+                     if (mutableGrid[y]?.[x]?.[1] === 'merged' && mutableGrid[y]?.[x]?.[0] !== 'G') {
                          const brickLeft = x;
                          const brickRight = x + 1;
                          const brickTop = y;
                          const brickBottom = y + 1;
 
-                        // Find closest point on brick rectangle to ball center
-                        const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
-                        const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
+                        // Simple AABB collision check for potential candidates
+                        if (nextX + BALL_RADIUS > brickLeft && nextX - BALL_RADIUS < brickRight &&
+                            nextY + BALL_RADIUS > brickTop && nextY - BALL_RADIUS < brickBottom) {
 
-                        // Calculate distance between ball center and closest point
-                        const distX = nextX - closestX;
-                        const distY = nextY - closestY;
-                        const distanceSquared = (distX * distX) + (distY * distY);
+                            // Check collision more accurately, considering ball trajectory
+                            // Determine potential collision point and normal
+                            const closestX = Math.max(brickLeft, Math.min(nextX, brickRight));
+                            const closestY = Math.max(brickTop, Math.min(nextY, brickBottom));
+                            const distX = nextX - closestX;
+                            const distY = nextY - closestY;
 
-                         // If distance is less than ball radius squared, collision occurs
-                        if (distanceSquared < BALL_RADIUS * BALL_RADIUS) {
-                            // console.log(`Collision with brick at [${x}, ${y}]`);
+                            if (distX * distX + distY * distY < BALL_RADIUS * BALL_RADIUS) {
+                                // Calculate penetration
+                                const penetrationX = BALL_RADIUS - Math.abs(distX);
+                                const penetrationY = BALL_RADIUS - Math.abs(distY);
 
-                             // --- Determine Bounce Direction ---
-                             const penetrationX = BALL_RADIUS - Math.abs(distX);
-                             const penetrationY = BALL_RADIUS - Math.abs(distY);
+                                // Determine collision side based on penetration depth
+                                if (!collisionHandled || (penetrationX < Infinity && penetrationY < Infinity) /* Add better time logic if needed */) {
+                                    collisionHandled = true;
+                                    collidedBrickX = x;
+                                    collidedBrickY = y;
 
-                            if (penetrationY < penetrationX) {
-                                 // Vertical collision is dominant
-                                 newDy = (distY > 0 ? 1 : -1) * Math.abs(newDy); // Bounce away vertically
-                                 nextY = (distY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
-                             } else {
-                                 // Horizontal collision is dominant
-                                 newDx = (distX > 0 ? 1 : -1) * Math.abs(newDx); // Bounce away horizontally
-                                 nextX = (distX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
-                             }
-
-                            // --- Break Brick ---
-                            mutableGrid[y][x] = [0, 'clear']; // Set brick to empty in the mutable copy
-                            brickBroken = true;
-                            collisionHandled = true; // Mark collision as handled to exit loops
-                         }
+                                    if (penetrationY < penetrationX) { // Vertical collision dominant
+                                        collisionNormalX = 0;
+                                        collisionNormalY = distY > 0 ? 1 : -1;
+                                        nextY = (collisionNormalY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
+                                    } else { // Horizontal collision dominant
+                                        collisionNormalX = distX > 0 ? 1 : -1;
+                                        collisionNormalY = 0;
+                                        nextX = (collisionNormalX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
+                                    }
+                                    // Reflect velocity based on normal
+                                    if (collisionNormalY !== 0) newDy = -newDy;
+                                    if (collisionNormalX !== 0) newDx = -newDx;
+                                }
+                            }
+                        }
                     }
                  }
+            }
+
+
+            if (collisionHandled && collidedBrickX !== -1 && collidedBrickY !== -1) {
+                // Break the collided brick
+                if (mutableGrid[collidedBrickY]?.[collidedBrickX]?.[0] !== 'G') { // Ensure not breaking grey block
+                    mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
+                    brickBroken = true;
+                } else {
+                    // If hit grey block, still bounce but don't break/score
+                    collisionHandled = true; // Make sure bounce happens
+                    brickBroken = false; // No score
+                }
             }
 
 
             if (brickBroken) {
                 setGrid(mutableGrid); // Update grid state only if a brick was broken
                 setScore(prev => prev + BRICK_BREAK_SCORE);
+                 // Speed update happens via useEffect watching score
             }
 
             // --- Game Over Condition (Ball hits bottom floor of Pong area) ---
@@ -483,7 +545,7 @@ export const useTetroPongGame = () => {
             return { x: nextX, y: nextY, dx: newDx, dy: newDy };
         });
 
-    }, [paddle.x, grid, score]); // Include score to potentially adjust ball speed later
+    }, [paddle.x, grid, score, speedMultiplier]); // Include dependencies
 
 
     // --- Game Loop ---
@@ -534,7 +596,8 @@ export const useTetroPongGame = () => {
                  dropPlayer();
                  keysPressed.current[key] = true; // Mark as pressed
                  // Optionally restart drop timer for faster soft drop
-                 // setTetrisDropTime(prev => Math.min(prev ?? TETRIS_DROP_INTERVAL_INITIAL, 100));
+                 const fastDropTime = Math.max(50, (tetrisDropTime ?? TETRIS_DROP_INTERVAL_INITIAL) / 5); // e.g., 5x faster
+                 setTetrisDropTime(fastDropTime);
                  handled = true;
              } else if (key === 'ArrowUp') {
                   playerRotate(); // Rotate clockwise
@@ -551,7 +614,7 @@ export const useTetroPongGame = () => {
              event.preventDefault(); // Prevent default browser actions (e.g., scrolling)
         }
 
-    }, [gameOver, gameStarted, movePlayer, dropPlayer, playerRotate, hardDropPlayer, isClient]);
+    }, [gameOver, gameStarted, movePlayer, dropPlayer, playerRotate, hardDropPlayer, isClient, tetrisDropTime]);
 
     const handleKeyUp = useCallback((event: KeyboardEvent) => {
          if (!isClient) return;
@@ -562,15 +625,15 @@ export const useTetroPongGame = () => {
 
          // Reset soft drop speed if ArrowDown is released
          if (key === 'ArrowDown' && gameStarted && !gameOver && !player.collided) {
-             const speedFactor = Math.floor(score / 50);
-             const currentDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL - speedFactor * 50);
-             // Only reset the timer if the piece isn't already landed/collided
+             // Reset to normal drop time based on current speed multiplier
+             const currentDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
+             // Only reset the timer if the piece isn't already landed/collided AND the timer was potentially sped up
              if (tetrisDropTime !== null) { // Check if timer is active
                 setTetrisDropTime(currentDropTime);
              }
          }
 
-    }, [isClient, score, gameStarted, gameOver, player.collided, tetrisDropTime]); // Add relevant dependencies
+    }, [isClient, score, gameStarted, gameOver, player.collided, tetrisDropTime, speedMultiplier]); // Add relevant dependencies
 
      // Attach event listeners only on the client
      useEffect(() => {
@@ -587,21 +650,23 @@ export const useTetroPongGame = () => {
     const startGame = useCallback(() => {
         if (!isClient) return; // Ensure this runs only client-side
         console.log("Starting Game");
-        setGrid(createEmptyGrid());
-        setBall({ // Reset ball with random initial horizontal direction
-            x: GAME_WIDTH / 2,
-             y: TETRIS_HEIGHT + 2, // Start ball below Tetris grid but within Pong area
-            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1),
-            dy: INITIAL_BALL_SPEED_Y, // Start moving down
+        setScore(0); // Reset score FIRST to recalculate initial speed multiplier
+        setGrid(createEmptyGrid()); // createEmptyGrid now adds grey blocks
+        // Initialize ball speed with the base multiplier (which is 1 at score 0)
+        const initialSpeedMult = 1;
+        setBall({
+            ...baseInitialBallState,
+            dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1) * initialSpeedMult,
+            dy: INITIAL_BALL_SPEED_Y * initialSpeedMult,
         });
-        setPaddle(initialPaddleState);
-        setScore(0);
+        setPaddle(baseInitialPaddleState);
         setGameOver(false);
         setGameStarted(true);
         keysPressed.current = {}; // Reset keys pressed on start
         resetPlayer(); // Call resetPlayer *after* setting initial state
-        setTetrisDropTime(TETRIS_DROP_INTERVAL_INITIAL); // Start Tetris drop
+        // Tetris drop time is set within resetPlayer based on the current multiplier
     }, [resetPlayer, isClient]); // Ensure resetPlayer is stable
+
 
     // --- Render Grid ---
     // Calculate display grid using useMemo
@@ -619,6 +684,7 @@ export const useTetroPongGame = () => {
         // Expose constants needed for rendering
         gridWidth: TETRIS_WIDTH,
         gridHeight: TOTAL_GRID_HEIGHT,
+        tetrisHeight: TETRIS_HEIGHT, // Expose Tetris height for floor line
         paddleWidth: PADDLE_WIDTH,
         paddleHeight: PADDLE_HEIGHT,
         ballRadius: BALL_RADIUS,

@@ -13,6 +13,7 @@ interface GameDisplayProps {
   paddle: Paddle;
   gridWidth: number;
   gridHeight: number;
+  tetrisHeight: number; // Added prop for floor line position
   paddleWidth: number;
   paddleHeight: number;
   ballRadius: number;
@@ -25,6 +26,7 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
   paddle,
   gridWidth,
   gridHeight,
+  tetrisHeight, // Use this prop
   paddleWidth,
   paddleHeight,
   ballRadius,
@@ -34,6 +36,9 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
   // We use viewport height (vh) to make it scale reasonably well. Max height set in parent.
   const cellHeightVh = `calc(var(--game-max-height, 80vh) / ${gridHeight})`;
   const containerWidthStyle = `calc(${cellHeightVh} * ${gridWidth})`;
+
+  // Calculate floor position in percentage
+  const floorTopPercent = (tetrisHeight / gridHeight) * 100;
 
   return (
     <div
@@ -64,6 +69,15 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
           ))
         )}
       </div>
+
+      {/* Tetris Floor Line */}
+       <div
+         className="absolute left-0 w-full border-b-2 border-foreground/30" // Use foreground with opacity
+         style={{
+           top: `${floorTopPercent}%`, // Position based on tetrisHeight
+         }}
+       />
+
 
       {/* Pong Elements (Overlayed) - Positions converted to percentages */}
       {/* Paddle */}

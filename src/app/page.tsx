@@ -18,6 +18,7 @@ export default function Home() {
     startGame,
     gridWidth,
     gridHeight,
+    tetrisHeight, // Get tetrisHeight from the hook
     paddleWidth,
     paddleHeight,
     ballRadius,
@@ -60,6 +61,7 @@ export default function Home() {
                     paddle={paddle}
                     gridWidth={gridWidth}
                     gridHeight={gridHeight}
+                    tetrisHeight={tetrisHeight} // Pass tetrisHeight
                     paddleWidth={paddleWidth}
                     paddleHeight={paddleHeight}
                     ballRadius={ballRadius}
