@@ -15,6 +15,7 @@ export default function Home() {
     score,
     gameOver,
     gameStarted,
+    isPaused, // Get pause state
     startGame,
     gridWidth,
     gridHeight,
@@ -23,7 +24,7 @@ export default function Home() {
     paddleHeight,
     ballRadius,
     paddleY,
-    speedMultiplier, // Get speed multiplier
+    speedMultiplier,
   } = useTetroPongGame();
 
   return (
@@ -31,8 +32,9 @@ export default function Home() {
        {/* Controls Overlay - Top Right */}
        <div className="absolute top-4 right-4 text-right text-xs text-muted-foreground bg-card/80 p-2 rounded-md shadow">
           <h4 className="font-semibold mb-1 text-sm text-primary-foreground">Controls</h4>
-          <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Space: Hard Drop)</p>
+          <p><span className="font-semibold">Tetris:</span> Arrows (Up: Rotate, Down: Hard Drop)</p>
           <p><span className="font-semibold">Pong:</span> A (Left), S (Right)</p>
+          <p><span className="font-semibold">Game:</span> P (Pause)</p>
        </div>
 
       <Card className="w-full max-w-md mb-4 bg-card text-card-foreground shadow-lg">
@@ -50,10 +52,15 @@ export default function Home() {
             <div className="text-center py-10">
               <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to TetroPong!</h2>
               <p className="mb-6 text-lg">Clear lines, break bricks!</p>
-              {/* Instructions moved to top right */}
               <Button onClick={startGame} size="lg">Start Game</Button>
             </div>
           )}
+           {isPaused && gameStarted && ( // Show pause message only when game started
+             <div className="text-center py-10">
+               <h2 className="text-3xl font-bold text-primary mb-4">Paused</h2>
+               <p className="text-lg mb-6">Press 'P' to resume</p>
+             </div>
+           )}
           {gameOver && (
             <div className="text-center py-10">
               <h2 className="text-3xl font-bold text-destructive mb-4">Game Over!</h2>
@@ -61,7 +68,7 @@ export default function Home() {
               <Button onClick={startGame} size="lg" variant="secondary">Play Again?</Button>
             </div>
           )}
-          {gameStarted && (
+          {gameStarted && !isPaused && ( // Render game only if started and not paused
             <div
                 className="w-full flex justify-center items-center"
                 // Set max height using CSS variable for GameDisplay to consume
@@ -83,7 +90,6 @@ export default function Home() {
           )}
         </CardContent>
       </Card>
-       {/* Instructions Footer Removed */}
     </div>
   );
 }

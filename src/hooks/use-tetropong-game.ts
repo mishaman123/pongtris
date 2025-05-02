@@ -66,6 +66,7 @@ export const useTetroPongGame = () => {
     const [score, setScore] = useState(0);
     const [gameOver, setGameOver] = useState(false);
     const [gameStarted, setGameStarted] = useState(false);
+    const [isPaused, setIsPaused] = useState(false); // Pause state
     const [tetrisDropTime, setTetrisDropTime] = useState<number | null>(null);
     const [isClient, setIsClient] = useState(false); // For hydration safety
 
@@ -73,8 +74,14 @@ export const useTetroPongGame = () => {
 
     // Calculate speed multiplier based on score
     const speedMultiplier = useMemo(() => {
-        const levels = Math.floor(score / 20); // Increase level every 20 points
-        return Math.pow(1.05, levels); // Apply cumulative 5% increase per level
+        // Calculate the number of 20-point increments achieved.
+        const levels = Math.floor(score / 20);
+        // Apply a cumulative 5% increase for each level.
+        // Example: Score 0-19 (level 0): 1.00x
+        // Score 20-39 (level 1): 1.05x
+        // Score 40-59 (level 2): 1.05 * 1.05 = 1.1025x
+        // Score 60-79 (level 3): 1.05 * 1.05 * 1.05 = 1.1576x
+        return Math.pow(1.05, levels);
     }, [score]);
 
 
@@ -142,6 +149,7 @@ export const useTetroPongGame = () => {
 
      // --- Tetris Logic ---
      const resetPlayer = useCallback(() => {
+        if (gameOver) return; // Don't reset if game over
         const { type, piece } = getRandomTetromino();
         const newPlayerPos = { x: TETRIS_WIDTH / 2 - Math.floor(piece.shape[0].length / 2), y: 0 };
 
@@ -167,7 +175,7 @@ export const useTetroPongGame = () => {
             const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
             setTetrisDropTime(nextDropTime);
         }
-    }, [grid, checkTetrisCollision, speedMultiplier]); // grid and speedMultiplier dependency is needed
+    }, [grid, checkTetrisCollision, speedMultiplier, gameOver]); // Add gameOver dependency
 
     const rotate = (matrix: TetrisPieceShape): TetrisPieceShape => {
         // Transpose
@@ -177,7 +185,7 @@ export const useTetroPongGame = () => {
     };
 
     const playerRotate = useCallback(() => {
-        if (player.collided || player.pieceType === 'O' || gameOver || !gameStarted) return; // Don't rotate if collided, 'O' piece, or game not active
+        if (player.collided || player.pieceType === 'O' || gameOver || !gameStarted || isPaused) return; // Don't rotate if paused
 
         const clonedPlayer = JSON.parse(JSON.stringify(player));
         clonedPlayer.tetromino = rotate(clonedPlayer.tetromino);
@@ -212,19 +220,19 @@ export const useTetroPongGame = () => {
               }
         }
         setPlayer(clonedPlayer);
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
 
 
     const movePlayer = useCallback((dir: number) => {
-         if (player.collided || gameOver || !gameStarted) return; // Prevent movement after collision or if game not active
+         if (player.collided || gameOver || !gameStarted || isPaused) return; // Prevent movement if paused
          // Use Tetris-specific collision check
         if (!checkTetrisCollision(player, grid, { x: dir, y: 0 })) {
             setPlayer(prev => ({ ...prev, pos: { ...prev.pos, x: prev.pos.x + dir } }));
         }
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
 
     const dropPlayer = useCallback(() => {
-        if (player.collided || gameOver || !gameStarted) return; // Prevent dropping if collided or game not active
+        if (player.collided || gameOver || !gameStarted || isPaused) return; // Prevent dropping if paused
         // Check collision one step below using the Tetris-specific check
         if (!checkTetrisCollision(player, grid, { x: 0, y: 1 })) {
              setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: prev.pos.y + 1 } }));
@@ -233,11 +241,11 @@ export const useTetroPongGame = () => {
              setPlayer(prev => ({ ...prev, collided: true }));
              setTetrisDropTime(null); // Stop the interval when piece lands at its final spot
         }
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
 
 
     const hardDropPlayer = useCallback(() => {
-       if (gameOver || player.collided || !gameStarted) return;
+       if (gameOver || player.collided || !gameStarted || isPaused) return; // Prevent hard drop if paused
         let newY = player.pos.y;
         // Use checkTetrisCollision which now respects TETRIS_HEIGHT
         while (!checkTetrisCollision(player, grid, { x: 0, y: newY - player.pos.y + 1 })) {
@@ -246,12 +254,12 @@ export const useTetroPongGame = () => {
         // Set position to the lowest possible point and mark as collided
         setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: newY }, collided: true }));
         setTetrisDropTime(null); // Stop the interval immediately
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted]);
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
 
 
      // --- Merge and Line Clear ---
      const mergePieceToGrid = useCallback(() => {
-         if (gameOver) return; // Don't merge if game is already over
+         if (gameOver || isPaused) return; // Don't merge if paused
 
          // Ensure player position is valid before merging (safety check)
          if (player.pos.y < 0) {
@@ -330,33 +338,34 @@ export const useTetroPongGame = () => {
          resetPlayer();
 
 
-    }, [player, grid, resetPlayer, score, gameOver]); // Dependencies: player, grid, resetPlayer, score, gameOver
+    }, [player, grid, resetPlayer, score, gameOver, isPaused]); // Add isPaused
 
     // Effect to update Tetris drop speed when speedMultiplier changes
     useEffect(() => {
-        if (gameStarted && !gameOver && !player.collided && tetrisDropTime !== null) {
+        if (gameStarted && !gameOver && !isPaused && !player.collided && tetrisDropTime !== null) { // Check pause state
             const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
             setTetrisDropTime(nextDropTime);
         }
-    }, [speedMultiplier, gameStarted, gameOver, player.collided, tetrisDropTime]); // Run when speedMultiplier or game state changes
+    }, [speedMultiplier, gameStarted, gameOver, player.collided, tetrisDropTime, isPaused]); // Add isPaused
 
 
     // Effect to handle piece collision and merging logic AFTER state update
     useEffect(() => {
-        // Only trigger merge when the piece has *just* become collided
-        // Check if collided AND the position is within or touching the Tetris floor
-        if (player.collided && player.pos.y < TETRIS_HEIGHT && gameStarted && !gameOver) {
+        // Only trigger merge when the piece has *just* become collided and not paused
+        if (player.collided && player.pos.y < TETRIS_HEIGHT && gameStarted && !gameOver && !isPaused) { // Check pause state
              mergePieceToGrid();
-        } else if (player.collided && player.pos.y >= TETRIS_HEIGHT) {
+        } else if (player.collided && player.pos.y >= TETRIS_HEIGHT && !isPaused) { // Check pause state
             // Handle case where piece somehow becomes collided below Tetris area (should not happen with correct checks)
             console.warn("Piece collided below Tetris floor. Resetting.");
             resetPlayer(); // Or handle as game over depending on rules
         }
-    }, [player.collided, player.pos.y, gameStarted, gameOver, mergePieceToGrid, resetPlayer]); // Add player.pos.y dependency
+    }, [player.collided, player.pos.y, gameStarted, gameOver, mergePieceToGrid, resetPlayer, isPaused]); // Add isPaused
 
 
     // --- Pong Logic ---
     const updatePongState = useCallback(() => {
+        if (isPaused) return; // Don't update pong if paused
+
          // Update Paddle Position (apply speed multiplier)
          setPaddle(prevPaddle => {
            let newX = prevPaddle.x;
@@ -428,12 +437,6 @@ export const useTetroPongGame = () => {
                   // Simple speed limit to prevent extreme horizontal speeds after angle adjustment
                   const maxDx = currentSpeedMagnitudeX * maxHorizontalFactor;
                   newDx = Math.max(-maxDx, Math.min(maxDx, newDx));
-
-                 // // Prevent ball from having too slow horizontal speed after angle adjustment (Optional refinement)
-                 // const minHorizontalRatio = 0.2;
-                 // if (Math.abs(newDx) < currentSpeedMagnitudeX * minHorizontalRatio) {
-                 //    newDx = Math.sign(newDx || (Math.random() > 0.5 ? 1 : -1)) * currentSpeedMagnitudeX * minHorizontalRatio;
-                 // }
             }
 
 
@@ -503,16 +506,15 @@ export const useTetroPongGame = () => {
                                  mutableGrid[collidedBrickY][collidedBrickX] = [0, 'clear'];
                                  brickBroken = true;
 
-
-                                 // Break loop after first collision handling
-                                 gotoCollisionEnd(); // Use goto to break out of nested loops cleanly
+                                 // Use flag to break after handling collision
+                                 gotoCollisionEnd();
                              }
                          }
                     }
                 }
             }
 
-            function gotoCollisionEnd() {} // Label for breaking out
+            function gotoCollisionEnd() {} // Label target
 
             // --- Post-Collision Updates ---
             if (brickBroken) {
@@ -538,30 +540,45 @@ export const useTetroPongGame = () => {
             return { x: nextX, y: nextY, dx: newDx, dy: newDy };
         });
 
-    }, [paddle.x, grid, score, speedMultiplier]); // Include dependencies
+    }, [paddle.x, grid, score, speedMultiplier, isPaused]); // Add isPaused
 
 
     // --- Game Loop ---
     useInterval(() => {
-        if (!isClient || !gameStarted || gameOver) return;
+        if (!isClient || !gameStarted || gameOver || isPaused) return; // Check pause state
         updatePongState();
         // Tetris drop is handled by its own interval (tetrisDropTime)
     }, gameStarted && !gameOver ? GAME_TICK_MS : null);
 
     // --- Tetris Auto Drop Interval ---
      useInterval(() => {
-        // Only drop if game is running, not over, and piece hasn't collided yet
-        if (!isClient || !gameStarted || gameOver || player.collided) return;
+        // Only drop if game is running, not over, and piece hasn't collided yet and not paused
+        if (!isClient || !gameStarted || gameOver || player.collided || isPaused) return; // Check pause state
         dropPlayer(); // Use the dropPlayer function which includes collision check
     }, tetrisDropTime);
 
 
     // --- Input Handling ---
     const handleKeyDown = useCallback((event: KeyboardEvent) => {
-         if (!isClient || !gameStarted || gameOver) return; // Ignore input if game not ready/active
+         if (!isClient) return; // Ignore input if not client
 
         const { key } = event;
         let handled = false;
+
+        // Pause Toggle (works even if game not started or over, but only if client)
+         if (key === 'p' || key === 'P') {
+            if (gameStarted) { // Only allow pausing if game has started
+                setIsPaused(prev => !prev);
+                console.log(isPaused ? "Game Resumed" : "Game Paused");
+                handled = true;
+            }
+         }
+
+         // Ignore other inputs if paused or game not ready/active
+         if (isPaused || !gameStarted || gameOver) {
+            if (handled) event.preventDefault(); // Prevent default for 'p' even when paused
+            return;
+         }
 
         // Pong Controls (continuous) - Store lowercase
         if (key === 'a' || key === 'A') {
@@ -585,48 +602,36 @@ export const useTetroPongGame = () => {
                  keysPressed.current[key] = true; // Mark as pressed
                  handled = true;
              } else if (key === 'ArrowDown') {
-                 // Soft drop - allow holding down
-                 dropPlayer();
-                 keysPressed.current[key] = true; // Mark as pressed
-                 // Optionally restart drop timer for faster soft drop
-                 const fastDropTime = Math.max(50, (tetrisDropTime ?? TETRIS_DROP_INTERVAL_INITIAL) / 5); // e.g., 5x faster
-                 setTetrisDropTime(fastDropTime);
-                 handled = true;
+                  hardDropPlayer(); // Changed Space to ArrowDown for hard drop
+                  keysPressed.current[key] = true; // Mark as pressed
+                  handled = true;
              } else if (key === 'ArrowUp') {
                   playerRotate(); // Rotate clockwise
                   keysPressed.current[key] = true; // Mark as pressed
                   handled = true;
-             } else if (key === ' ') { // Space for hard drop
-                  hardDropPlayer();
-                  keysPressed.current[key] = true; // Mark as pressed
-                  handled = true;
              }
+             // Removed Space bar control
+             // else if (key === ' ') { ... }
         }
+        // Soft drop - allow holding down, but not a dedicated key here anymore
 
         if (handled) {
              event.preventDefault(); // Prevent default browser actions (e.g., scrolling)
         }
 
-    }, [gameOver, gameStarted, movePlayer, dropPlayer, playerRotate, hardDropPlayer, isClient, tetrisDropTime]);
+    }, [gameOver, gameStarted, isPaused, movePlayer, hardDropPlayer, playerRotate, isClient, tetrisDropTime]); // Added isPaused
 
     const handleKeyUp = useCallback((event: KeyboardEvent) => {
          if (!isClient) return;
         const { key } = event;
         // Clear the pressed state for all keys on keyup
         delete keysPressed.current[key.toLowerCase()]; // For continuous controls (a, s)
-        delete keysPressed.current[key]; // For discrete controls (Arrows, Space)
+        delete keysPressed.current[key]; // For discrete controls (Arrows, p)
 
-         // Reset soft drop speed if ArrowDown is released
-         if (key === 'ArrowDown' && gameStarted && !gameOver && !player.collided) {
-             // Reset to normal drop time based on current speed multiplier
-             const currentDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
-             // Only reset the timer if the piece isn't already landed/collided AND the timer was potentially sped up
-             if (tetrisDropTime !== null) { // Check if timer is active
-                setTetrisDropTime(currentDropTime);
-             }
-         }
+         // No need to reset soft drop speed as ArrowDown is now hard drop
+         // if (key === 'ArrowDown' && ... ) { ... }
 
-    }, [isClient, score, gameStarted, gameOver, player.collided, tetrisDropTime, speedMultiplier]); // Add relevant dependencies
+    }, [isClient, score, gameStarted, gameOver, player.collided, tetrisDropTime, speedMultiplier, isPaused]); // Added isPaused
 
      // Attach event listeners only on the client
      useEffect(() => {
@@ -645,6 +650,7 @@ export const useTetroPongGame = () => {
         console.log("Starting Game");
         setScore(0); // Reset score FIRST to recalculate initial speed multiplier
         setGrid(createEmptyGrid()); // createEmptyGrid now adds grey blocks
+        setIsPaused(false); // Ensure game is not paused on start/restart
         // Initialize ball speed with the base multiplier (which is 1 at score 0)
         const initialSpeedMult = 1;
         setBall({
@@ -673,6 +679,7 @@ export const useTetroPongGame = () => {
         score,
         gameOver,
         gameStarted,
+        isPaused, // Expose pause state
         startGame,
         speedMultiplier, // Expose the speed multiplier
         // Expose constants needed for rendering
