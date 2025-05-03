@@ -88,8 +88,9 @@ export const useTetroPongGame = () => {
     // Calculate speed multiplier based on score (cumulative 5% increase per 12 points)
     const speedMultiplier = useMemo(() => {
         const levels = Math.floor(score / 12);
+        // Cumulative increase: base * (1 + rate)^levels
         return Math.pow(1.05, levels);
-    }, [score]);
+     }, [score]);
 
     // Minimum horizontal speed derived from minimum angle and base speed
     const minDxThreshold = useMemo(() => {
@@ -163,7 +164,8 @@ export const useTetroPongGame = () => {
 
      // --- Tetris Logic ---
      const resetPlayer = useCallback((currentGrid: TetrisGrid) => {
-        if (gameOver) return false; // Don't reset if game over
+        // Ensure this doesn't run if the component isn't mounted or if already game over
+        if (!isClient || gameOver) return false;
 
         const { type, piece } = getRandomTetromino();
         const newPlayerPos = { x: TETRIS_WIDTH / 2 - Math.floor(piece.shape[0].length / 2), y: 0 };
@@ -185,15 +187,15 @@ export const useTetroPongGame = () => {
                 collided: false,
             });
             // Reset drop time based on *current* speed multiplier when a new piece starts
-            // Important: Use the current speed multiplier directly in calculations,
-            // but use the *base* drop interval for setting the initial timer duration.
-            // The interval hook itself will use the current 'tetrisDropTime' state.
-            const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
+            const currentSpeedMultiplier = Math.pow(1.05, Math.floor(score / 12)); // Recalculate here based on current score
+            const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / currentSpeedMultiplier);
             setTetrisDropTime(initialDropTime);
+            console.log("New piece spawned, drop time:", initialDropTime);
 
             return true; // Indicate successful reset
         }
-    }, [checkTetrisCollision, speedMultiplier, gameOver]); // Remove grid dependency, pass it in
+     }, [checkTetrisCollision, isClient, gameOver, score]); // Added score as dependency
+
 
     const rotate = (matrix: TetrisPieceShape): TetrisPieceShape => {
         // Transpose
@@ -357,13 +359,15 @@ export const useTetroPongGame = () => {
         return { newGrid: finalGrid, linesCleared: clearedLines };
 
 
-    }, [gameOver, isPaused]); // Removed dependencies on grid/player/score
+     }, [gameOver, isPaused]); // Removed dependencies on grid/player/score
 
     // Effect to update Tetris drop speed when speedMultiplier changes
     useEffect(() => {
         if (gameStarted && !gameOver && !isPaused && !player.collided && tetrisDropTime !== null) { // Check pause state
             const nextDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / speedMultiplier);
-            setTetrisDropTime(nextDropTime);
+             if (Math.abs(nextDropTime - tetrisDropTime) > 1) { // Avoid tiny updates causing interval churn
+               setTetrisDropTime(nextDropTime);
+             }
         }
     }, [speedMultiplier, gameStarted, gameOver, player.collided, tetrisDropTime, isPaused]); // Add isPaused
 
@@ -546,10 +550,10 @@ export const useTetroPongGame = () => {
                                      const brickType = mutableGrid[y][x][0]; // Get brick type before clearing
                                      mutableGrid[y][x] = [0, 'clear']; // Clear the brick
                                      brickBroken = true; // Mark that a brick was broken
-                                     // Only add score if it wasn't a grey brick
-                                     if (brickType !== 'G') {
-                                         scoreAdded = true;
-                                     }
+                                     // Only add score if it wasn't a grey brick (was only scoring non-grey)
+                                      // Correction: Add score for ANY broken brick (grey or colored)
+                                      scoreAdded = true; // Always add score now
+
                                  }
 
                                  breakLoop = true; // Set flag to exit loops
@@ -563,7 +567,7 @@ export const useTetroPongGame = () => {
             // --- Post-Collision Updates ---
             if (brickBroken) { // Check if *any* brick was broken
                 setGrid(mutableGrid); // Update grid state
-                if (scoreAdded) { // Add score only if a non-grey brick was broken
+                if (scoreAdded) { // Add score if a brick was broken
                     setScore(prev => prev + BRICK_BREAK_SCORE);
                 }
             }
@@ -617,11 +621,15 @@ export const useTetroPongGame = () => {
                         action();
                     } else {
                         // Clear interval if key was released between checks
-                        if(keyState.repeatTimeout) clearInterval(keyState.repeatTimeout);
-                        keyState.repeatTimeout = null;
+                        // Check keyState and repeatTimeout again before clearing
+                        if(keysPressed.current[key]?.repeatTimeout) {
+                            clearInterval(keysPressed.current[key].repeatTimeout!);
+                            keysPressed.current[key].repeatTimeout = null;
+                        }
                     }
                 }, interval);
             } else if (!keyState?.pressed && keyState?.repeatTimeout !== null) {
+                // Ensure keyState and keyState.repeatTimeout exist before clearing
                 clearInterval(keyState.repeatTimeout);
                 keyState.repeatTimeout = null;
             }
@@ -636,6 +644,7 @@ export const useTetroPongGame = () => {
              // Clear all known repeat intervals
             ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
                  const keyState = keysPressed.current[key];
+                // Check if keyState and repeatTimeout exist before clearing
                 if (keyState?.repeatTimeout) {
                     clearInterval(keyState.repeatTimeout);
                     // Optional: Reset the timeout property in the ref, though the ref might be cleared entirely later
@@ -784,13 +793,18 @@ export const useTetroPongGame = () => {
             dy: INITIAL_BALL_SPEED_Y,
         });
         setPaddle(baseInitialPaddleState); // Reset paddle state
-        setPlayer(baseInitialPlayerState); // Temporarily reset player before final resetPlayer call
+        setPlayer(baseInitialPlayerState); // Reset player state to default before the final check
 
         setGameStarted(true); // Mark game as started *before* resetPlayer
 
-        // Reset player piece and start drop timer AFTER setting gameStarted
-        // and AFTER all other states are reset
-        const resetSuccess = resetPlayer(initialGrid); // Pass the initial grid
+        // Need to explicitly calculate the initial multiplier based on the reset score (0)
+        const initialMultiplier = Math.pow(1.05, Math.floor(0 / 12)); // Should be 1
+        const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / initialMultiplier);
+        setTetrisDropTime(initialDropTime); // Set initial drop time *before* resetPlayer
+
+        // Reset player piece AFTER setting gameStarted and AFTER all other states are reset.
+        // Pass the freshly created initialGrid.
+        const resetSuccess = resetPlayer(initialGrid);
 
         if (!resetSuccess) {
             // Should typically not happen on a fresh grid, but handle anyway
@@ -799,21 +813,17 @@ export const useTetroPongGame = () => {
             setGameOver(true);
             setTetrisDropTime(null); // Ensure timer is null if game over on start
         } else {
-             // If reset succeeded, ensure tetrisDropTime is set correctly
-             // based on the initial speedMultiplier (which depends on score, initially 0, so multiplier is 1)
-             const currentSpeedMultiplier = Math.pow(1.05, Math.floor(0 / 12)); // Recalculate for clarity
-             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / currentSpeedMultiplier);
-             setTetrisDropTime(initialDropTime);
-             console.log("Game started, initial drop time:", initialDropTime);
+             console.log("Game started successfully, initial drop time:", initialDropTime);
         }
 
-    }, [resetPlayer, isClient]); // Make sure resetPlayer is stable
+    }, [resetPlayer, isClient]); // resetPlayer dependency is important
 
 
     // --- Render Grid ---
     // Calculate display grid using useMemo
     const displayGrid = useMemo(() => {
         // Don't draw player if game over or not started yet
+        // Pass the current player state for drawing if the game is active
         return updateGrid(grid, !gameStarted || gameOver ? baseInitialPlayerState : player);
      }, [grid, player, updateGrid, gameOver, gameStarted]); // Add gameStarted
 
