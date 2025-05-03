@@ -418,7 +418,8 @@ export const useTetroPongGame = () => {
             let currentDy = prevBall.dy * speedMultiplier;
             let newDxDirection = prevBall.dx; // Base direction for bounce logic
             let newDyDirection = prevBall.dy;
-            let brickBroken = false;
+            let brickBroken = false; // Flag if *any* brick (grey or colored) was broken
+            let scoreAdded = false; // Flag if points should be added (only for non-grey)
             let mutableGrid = grid.map(row => [...row]); // Create mutable copy for potential brick break
             let collisionHandled = false; // Flag to prevent multiple collision logic per tick
 
@@ -497,9 +498,9 @@ export const useTetroPongGame = () => {
                 const gridYMax = Math.min(TETRIS_HEIGHT - 1, Math.floor(nextY + BALL_RADIUS));
 
                 // Collision detection loop
-                brickLoop:
-                 for (let y = gridYMin; y <= gridYMax; y++) {
-                     for (let x = gridXMin; x <= gridXMax; x++) {
+                let breakLoop = false; // Use a flag instead of goto
+                 for (let y = gridYMin; y <= gridYMax && !breakLoop; y++) {
+                     for (let x = gridXMin; x <= gridXMax && !breakLoop; x++) {
                          if (mutableGrid[y]?.[x]?.[1] === 'merged') {
                              const brickLeft = x;
                              const brickRight = x + 1;
@@ -517,40 +518,31 @@ export const useTetroPongGame = () => {
                                  collisionHandled = true;
 
                                  // --- Determine Bounce Direction ---
-                                 // Calculate penetration depths
                                  const penX = BALL_RADIUS - Math.abs(distX);
                                  const penY = BALL_RADIUS - Math.abs(distY);
 
-                                 // Simplified bounce logic: primarily bounce on the axis with less penetration
-                                 if (penY < penX) { // Vertical collision is primary
-                                     // Correct position vertically
+                                 if (penY < penX) { // Vertical collision
                                      nextY = (distY > 0) ? brickBottom + BALL_RADIUS : brickTop - BALL_RADIUS;
-                                     // Reflect vertical direction
                                      newDyDirection = -prevBall.dy;
-                                     // Ensure minimum horizontal speed after vertical bounce
                                       if (Math.abs(newDxDirection) < minDxThreshold) {
                                           newDxDirection = minDxThreshold * (newDxDirection >= 0 ? 1 : -1) * (Math.random() > 0.5 ? 1 : -1);
                                       }
-
-                                 } else { // Horizontal collision is primary (or equal penetration)
-                                     // Correct position horizontally
+                                 } else { // Horizontal collision
                                      nextX = (distX > 0) ? brickRight + BALL_RADIUS : brickLeft - BALL_RADIUS;
-                                     // Reflect horizontal direction
                                      newDxDirection = -prevBall.dx;
                                  }
 
-
-                                 // Break the collided brick (only non-grey)
-                                 if (mutableGrid[y][x][0] !== 'G') {
-                                     mutableGrid[y][x] = [0, 'clear'];
-                                     brickBroken = true;
-                                 } else {
-                                    // If it's a grey brick, still bounce but don't break or add score
-                                     brickBroken = false; // Ensure flag is false
+                                 // Break the collided brick (grey or colored)
+                                 if (mutableGrid[y][x][0] !== 0) { // Check if it's not already cleared
+                                     // Only add score if it wasn't a grey brick
+                                     if (mutableGrid[y][x][0] !== 'G') {
+                                         scoreAdded = true;
+                                     }
+                                     mutableGrid[y][x] = [0, 'clear']; // Clear the brick regardless of color
+                                     brickBroken = true; // Mark that a brick was broken
                                  }
 
-
-                                 break brickLoop; // Exit both loops after handling one collision
+                                 breakLoop = true; // Set flag to exit loops
                              }
                          }
                      }
@@ -559,9 +551,11 @@ export const useTetroPongGame = () => {
 
 
             // --- Post-Collision Updates ---
-            if (brickBroken) {
-                setGrid(mutableGrid); // Update grid state only if a non-grey brick was broken
-                setScore(prev => prev + BRICK_BREAK_SCORE);
+            if (brickBroken) { // Check if *any* brick was broken
+                setGrid(mutableGrid); // Update grid state
+                if (scoreAdded) { // Add score only if a non-grey brick was broken
+                    setScore(prev => prev + BRICK_BREAK_SCORE);
+                }
             }
 
             // --- Game Over Condition (Ball hits bottom floor of Pong area) ---
@@ -620,7 +614,7 @@ export const useTetroPongGame = () => {
                      leftKey.repeatTimeout = null;
                  }
              }, MOVE_REPEAT_INTERVAL);
-        } else if (!leftKey?.pressed && leftKey?.repeatTimeout) {
+        } else if (!leftKey?.pressed && leftKey?.repeatTimeout !== null) { // Check repeatTimeout is not null before clearing
              clearInterval(leftKey.repeatTimeout);
              leftKey.repeatTimeout = null;
         }
@@ -636,7 +630,7 @@ export const useTetroPongGame = () => {
                      rightKey.repeatTimeout = null;
                  }
              }, MOVE_REPEAT_INTERVAL);
-         } else if (!rightKey?.pressed && rightKey?.repeatTimeout) {
+         } else if (!rightKey?.pressed && rightKey?.repeatTimeout !== null) {
               clearInterval(rightKey.repeatTimeout);
               rightKey.repeatTimeout = null;
          }
@@ -651,7 +645,7 @@ export const useTetroPongGame = () => {
                      downKey.repeatTimeout = null;
                  }
              }, SOFT_DROP_REPEAT_INTERVAL);
-         } else if (!downKey?.pressed && downKey?.repeatTimeout) {
+         } else if (!downKey?.pressed && downKey?.repeatTimeout !== null) {
               clearInterval(downKey.repeatTimeout);
               downKey.repeatTimeout = null;
          }
