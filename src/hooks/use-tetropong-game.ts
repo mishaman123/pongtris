@@ -29,12 +29,19 @@ import {
 export type Ball = {
     x: number; // position in grid units
     y: number; // position in grid units
-    dx: number; // velocity in grid units per tick
-    dy: number; // velocity in grid units per tick
+    dx: number; // velocity in grid units per tick (base direction)
+    dy: number; // velocity in grid units per tick (base direction)
 };
 
 export type Paddle = {
     x: number; // position in grid units
+};
+
+// Type for the state stored in keysPressed ref
+type KeyState = {
+    pressed: boolean;
+    firstPressTime: number | null;
+    repeatTimeout: NodeJS.Timeout | null;
 };
 
 const baseInitialPlayerState: Player = {
@@ -75,7 +82,8 @@ export const useTetroPongGame = () => {
     const [tetrisDropTime, setTetrisDropTime] = useState<number | null>(null);
     const [isClient, setIsClient] = useState(false); // For hydration safety
 
-    const keysPressed = useRef<{ [key: string]: { pressed: boolean; firstPressTime: number | null; repeatTimeout: NodeJS.Timeout | null } }>({});
+    // Ref to store key pressed state, including repeat timeouts
+    const keysPressed = useRef<{ [key: string]: KeyState }>({});
 
     // Calculate speed multiplier based on score (cumulative 5% increase per 12 points)
     const speedMultiplier = useMemo(() => {
@@ -501,6 +509,7 @@ export const useTetroPongGame = () => {
                 let breakLoop = false; // Use a flag instead of goto
                  for (let y = gridYMin; y <= gridYMax && !breakLoop; y++) {
                      for (let x = gridXMin; x <= gridXMax && !breakLoop; x++) {
+                         // Check if the cell exists and is merged before accessing its properties
                          if (mutableGrid[y]?.[x]?.[1] === 'merged') {
                              const brickLeft = x;
                              const brickRight = x + 1;
@@ -534,12 +543,13 @@ export const useTetroPongGame = () => {
 
                                  // Break the collided brick (grey or colored)
                                  if (mutableGrid[y][x][0] !== 0) { // Check if it's not already cleared
+                                     const brickType = mutableGrid[y][x][0]; // Get brick type before clearing
+                                     mutableGrid[y][x] = [0, 'clear']; // Clear the brick
+                                     brickBroken = true; // Mark that a brick was broken
                                      // Only add score if it wasn't a grey brick
-                                     if (mutableGrid[y][x][0] !== 'G') {
+                                     if (brickType !== 'G') {
                                          scoreAdded = true;
                                      }
-                                     mutableGrid[y][x] = [0, 'clear']; // Clear the brick regardless of color
-                                     brickBroken = true; // Mark that a brick was broken
                                  }
 
                                  breakLoop = true; // Set flag to exit loops
@@ -598,80 +608,42 @@ export const useTetroPongGame = () => {
     useEffect(() => {
         if (isPaused || gameOver || !gameStarted) return; // Only run when active
 
-        const leftKey = keysPressed.current['arrowleft'];
-        const rightKey = keysPressed.current['arrowright'];
-        const downKey = keysPressed.current['arrowdown'];
+        const handleRepeat = (key: string, action: () => void, interval: number) => {
+            const keyState = keysPressed.current[key];
+            if (keyState?.pressed && !keyState.repeatTimeout) {
+                keyState.repeatTimeout = setInterval(() => {
+                    // Ensure key is still pressed inside interval callback
+                    if (keysPressed.current[key]?.pressed) {
+                        action();
+                    } else {
+                        // Clear interval if key was released between checks
+                        if(keyState.repeatTimeout) clearInterval(keyState.repeatTimeout);
+                        keyState.repeatTimeout = null;
+                    }
+                }, interval);
+            } else if (!keyState?.pressed && keyState?.repeatTimeout !== null) {
+                clearInterval(keyState.repeatTimeout);
+                keyState.repeatTimeout = null;
+            }
+        };
 
-        // Left movement
-        if (leftKey?.pressed && !leftKey.repeatTimeout) {
-             leftKey.repeatTimeout = setInterval(() => {
-                 // Ensure key is still pressed inside interval callback
-                 if (keysPressed.current['arrowleft']?.pressed) {
-                     movePlayer(-1);
-                 } else {
-                     // Clear interval if key was released between checks
-                     if(leftKey.repeatTimeout) clearInterval(leftKey.repeatTimeout);
-                     leftKey.repeatTimeout = null;
-                 }
-             }, MOVE_REPEAT_INTERVAL);
-        } else if (!leftKey?.pressed && leftKey?.repeatTimeout !== null) { // Check repeatTimeout is not null before clearing
-             clearInterval(leftKey.repeatTimeout);
-             leftKey.repeatTimeout = null;
-        }
-
-
-        // Right movement
-         if (rightKey?.pressed && !rightKey.repeatTimeout) {
-             rightKey.repeatTimeout = setInterval(() => {
-                  if (keysPressed.current['arrowright']?.pressed) {
-                     movePlayer(1);
-                 } else {
-                      if(rightKey.repeatTimeout) clearInterval(rightKey.repeatTimeout);
-                     rightKey.repeatTimeout = null;
-                 }
-             }, MOVE_REPEAT_INTERVAL);
-         } else if (!rightKey?.pressed && rightKey?.repeatTimeout !== null) {
-              clearInterval(rightKey.repeatTimeout);
-              rightKey.repeatTimeout = null;
-         }
-
-        // Soft drop movement
-         if (downKey?.pressed && !downKey.repeatTimeout) {
-             downKey.repeatTimeout = setInterval(() => {
-                  if (keysPressed.current['arrowdown']?.pressed) {
-                     dropPlayer(true); // Soft drop repeats
-                 } else {
-                      if(downKey.repeatTimeout) clearInterval(downKey.repeatTimeout);
-                     downKey.repeatTimeout = null;
-                 }
-             }, SOFT_DROP_REPEAT_INTERVAL);
-         } else if (!downKey?.pressed && downKey?.repeatTimeout !== null) {
-              clearInterval(downKey.repeatTimeout);
-              downKey.repeatTimeout = null;
-         }
-
+        handleRepeat('arrowleft', () => movePlayer(-1), MOVE_REPEAT_INTERVAL);
+        handleRepeat('arrowright', () => movePlayer(1), MOVE_REPEAT_INTERVAL);
+        handleRepeat('arrowdown', () => dropPlayer(true), SOFT_DROP_REPEAT_INTERVAL);
 
         // Cleanup function to clear intervals on component unmount or pause/game over
         return () => {
-             // Use optional chaining for safety during cleanup
-             if (keysPressed.current['arrowleft']?.repeatTimeout) {
-                 clearInterval(keysPressed.current['arrowleft']!.repeatTimeout!);
-                 keysPressed.current['arrowleft']!.repeatTimeout = null;
-             }
-             if (keysPressed.current['arrowright']?.repeatTimeout) {
-                 clearInterval(keysPressed.current['arrowright']!.repeatTimeout!);
-                 keysPressed.current['arrowright']!.repeatTimeout = null;
-             }
-             if (keysPressed.current['arrowdown']?.repeatTimeout) {
-                 clearInterval(keysPressed.current['arrowdown']!.repeatTimeout!);
-                 keysPressed.current['arrowdown']!.repeatTimeout = null;
-             }
+             // Clear all known repeat intervals
+            ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
+                 const keyState = keysPressed.current[key];
+                if (keyState?.repeatTimeout) {
+                    clearInterval(keyState.repeatTimeout);
+                    // Optional: Reset the timeout property in the ref, though the ref might be cleared entirely later
+                    // keyState.repeatTimeout = null;
+                }
+            });
         };
-    }, [
-        // Using direct access inside useEffect to avoid stale closures
-        // but listing dependencies that influence the logic
-        isPaused, gameOver, gameStarted, movePlayer, dropPlayer
-    ]);
+    }, [isPaused, gameOver, gameStarted, movePlayer, dropPlayer]); // Dependencies influencing the logic
 
 
     // --- Input Handling ---
@@ -724,9 +696,7 @@ export const useTetroPongGame = () => {
                  if (keyLower === 'arrowright') movePlayer(1);
                  if (keyLower === 'arrowdown') dropPlayer(true); // Initial soft drop
 
-                 // Set timeout for continuous move/drop AFTER initial action
-                 // The useEffect hook now handles setting up the interval
-                 // based on the 'pressed' state, so no need for setTimeout here.
+                 // The useEffect hook now handles setting up the interval based on the 'pressed' state
              }
              handled = true;
          } else if (keyLower === 'arrowup') {
@@ -754,16 +724,17 @@ export const useTetroPongGame = () => {
     const handleKeyUp = useCallback((event: KeyboardEvent) => {
          if (!isClient) return;
         const keyLower = event.key.toLowerCase();
+        const keyState = keysPressed.current[keyLower];
 
-        if (keysPressed.current[keyLower]) {
+        if (keyState) {
              // Clear the interval directly if it exists
-             if (keysPressed.current[keyLower].repeatTimeout) {
-                 clearInterval(keysPressed.current[keyLower].repeatTimeout!);
+             if (keyState.repeatTimeout) {
+                 clearInterval(keyState.repeatTimeout);
              }
             // Update the state in the ref
-             keysPressed.current[keyLower].pressed = false;
-             keysPressed.current[keyLower].firstPressTime = null;
-             keysPressed.current[keyLower].repeatTimeout = null;
+             keyState.pressed = false;
+             keyState.firstPressTime = null;
+             keyState.repeatTimeout = null;
         }
 
     }, [isClient]); // Removed unnecessary dependencies
@@ -778,12 +749,14 @@ export const useTetroPongGame = () => {
          return () => {
              window.removeEventListener('keydown', handleKeyDown);
              window.removeEventListener('keyup', handleKeyUp);
-             Object.values(keysPressed.current).forEach(keyState => {
-                 if (keyState?.repeatTimeout) { // Check if keyState exists
-                     clearInterval(keyState.repeatTimeout);
-                 }
-             });
-             keysPressed.current = {}; // Clear keys pressed state on unmount
+             // Clear all known repeat intervals on unmount
+              ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
+                 const keyState = keysPressed.current[key];
+                if (keyState?.repeatTimeout) {
+                    clearInterval(keyState.repeatTimeout);
+                }
+            });
+             keysPressed.current = {}; // Clear keys pressed state fully on unmount
          };
      }, [isClient, handleKeyDown, handleKeyUp]); // Re-add if handlers change
 
@@ -794,7 +767,7 @@ export const useTetroPongGame = () => {
 
         // Clear any existing intervals/timeouts from previous game state
          Object.values(keysPressed.current).forEach(keyState => {
-             if (keyState?.repeatTimeout) { // Check if keyState exists
+             if (keyState?.repeatTimeout) {
                  clearInterval(keyState.repeatTimeout);
              }
          });
@@ -816,19 +789,22 @@ export const useTetroPongGame = () => {
         setGameStarted(true); // Mark game as started *before* resetPlayer
 
         // Reset player piece and start drop timer AFTER setting gameStarted
+        // and AFTER all other states are reset
         const resetSuccess = resetPlayer(initialGrid); // Pass the initial grid
 
         if (!resetSuccess) {
             // Should typically not happen on a fresh grid, but handle anyway
             console.error("Game over immediately on start - spawn collision?");
-            setGameStarted(false);
+            setGameStarted(false); // Set back to false if reset failed
             setGameOver(true);
             setTetrisDropTime(null); // Ensure timer is null if game over on start
         } else {
-             // Explicitly set drop time if resetPlayer succeeded and game started
-             // Use the initial speed multiplier (1) for the first drop interval
-             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / 1);
+             // If reset succeeded, ensure tetrisDropTime is set correctly
+             // based on the initial speedMultiplier (which depends on score, initially 0, so multiplier is 1)
+             const currentSpeedMultiplier = Math.pow(1.05, Math.floor(0 / 12)); // Recalculate for clarity
+             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / currentSpeedMultiplier);
              setTetrisDropTime(initialDropTime);
+             console.log("Game started, initial drop time:", initialDropTime);
         }
 
     }, [resetPlayer, isClient]); // Make sure resetPlayer is stable
@@ -837,9 +813,9 @@ export const useTetroPongGame = () => {
     // --- Render Grid ---
     // Calculate display grid using useMemo
     const displayGrid = useMemo(() => {
-        // Don't draw player if game over
-        return updateGrid(grid, gameOver ? baseInitialPlayerState : player);
-     }, [grid, player, updateGrid, gameOver]);
+        // Don't draw player if game over or not started yet
+        return updateGrid(grid, !gameStarted || gameOver ? baseInitialPlayerState : player);
+     }, [grid, player, updateGrid, gameOver, gameStarted]); // Add gameStarted
 
 
     return {
