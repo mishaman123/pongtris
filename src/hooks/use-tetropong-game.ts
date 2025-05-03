@@ -163,7 +163,7 @@ export const useTetroPongGame = () => {
 
 
      // --- Tetris Logic ---
-     const resetPlayer = useCallback((currentGrid: TetrisGrid) => {
+     const resetPlayer = useCallback((currentGrid: TetrisGrid): boolean => {
         // Ensure this doesn't run if the component isn't mounted
         if (!isClient) return false;
 
@@ -171,6 +171,7 @@ export const useTetroPongGame = () => {
         const newPlayerPos = { x: TETRIS_WIDTH / 2 - Math.floor(piece.shape[0].length / 2), y: 0 };
 
         // Check collision at spawn position using the Tetris-specific height on the provided grid
+        // Crucially, use the passed-in `currentGrid` which should be the latest state
         if (checkTetrisCollision({ ...baseInitialPlayerState, pos: newPlayerPos, tetromino: piece.shape, pieceType: type }, currentGrid, { x: 0, y: 0 })) {
              // Game Over should be handled by the caller based on this return value
              console.log("Collision detected on new piece spawn");
@@ -182,9 +183,10 @@ export const useTetroPongGame = () => {
                 pieceType: type,
                 collided: false,
             });
-            // Reset drop time based on *current* speed multiplier when a new piece starts
-            const currentSpeedMultiplier = Math.pow(1.05, Math.floor(score / 12)); // Recalculate here based on current score
-            const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / currentSpeedMultiplier);
+            // Reset drop time based on *current* score when a new piece starts
+            // Recalculate multiplier based on current score (which might be updated)
+            const currentMultiplier = Math.pow(1.05, Math.floor(score / 12));
+            const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / currentMultiplier);
             setTetrisDropTime(initialDropTime);
             console.log("New piece spawned, drop time:", initialDropTime);
 
@@ -277,73 +279,83 @@ export const useTetroPongGame = () => {
 
 
      // --- Merge and Line Clear ---
-     const mergePieceToGrid = useCallback((currentGrid: TetrisGrid, currentPlayer: Player): { newGrid: TetrisGrid, linesCleared: number } => {
+     const mergePieceToGrid = useCallback((currentGrid: TetrisGrid, currentPlayer: Player): { newGrid: TetrisGrid, linesCleared: number, gameOverTriggered: boolean } => {
          // This function now receives grid and player to avoid stale state issues
-         if (isPaused) return { newGrid: currentGrid, linesCleared: 0 }; // Don't merge if paused
+         if (isPaused) return { newGrid: currentGrid, linesCleared: 0, gameOverTriggered: false }; // Don't merge if paused
+
+         let mergeGameOver = false; // Local flag for game over during merge
 
          // Ensure player position is valid before merging (safety check)
          if (currentPlayer.pos.y < 0) {
               console.warn("Attempted to merge piece with negative Y position:", currentPlayer.pos.y);
-              setGameOver(true); // Invalid state, end game
-              return { newGrid: currentGrid, linesCleared: 0 };
+              mergeGameOver = true; // Trigger game over
+              // Don't return early, let the function finish to return the state
          }
 
         const newGrid = currentGrid.map(row => [...row]); // Create a mutable copy
 
-        let mergeGameOver = false; // Local flag for game over during merge
-        currentPlayer.tetromino.forEach((row, y) => {
-            if (mergeGameOver) return; // Stop processing if game over detected
-            row.forEach((value, x) => {
-                 if (mergeGameOver) return;
-                if (value !== 0) {
-                    const gridY = y + currentPlayer.pos.y;
-                    const gridX = x + currentPlayer.pos.x;
-                    // Ensure we are within grid boundaries before attempting to merge
-                    // Merge piece ONLY within the TETRIS_HEIGHT
-                    if (gridY >= 0 && gridY < TETRIS_HEIGHT && gridX >= 0 && gridX < TETRIS_WIDTH) {
-                         if (newGrid[gridY]?.[gridX]?.[1] === 'clear') {
-                           newGrid[gridY][gridX] = [currentPlayer.pieceType, 'merged'];
-                         } else if (newGrid[gridY]?.[gridX]?.[1] === 'merged') {
-                             console.warn(`Merge Overlap: Trying to merge onto existing merged block at [${gridX}, ${gridY}]`);
-                             setGameOver(true);
-                             mergeGameOver = true; // Set local flag
-                             return; // Exit early if game over
-                         }
-                    } else if (gridY < 0 && gridX >=0 && gridX < TETRIS_WIDTH) {
-                        // Handle case where part of the piece is above the grid after hard drop/rotation
-                        console.log("Piece merged partially or fully above grid top.");
-                        setGameOver(true);
-                        mergeGameOver = true; // Set local flag
-                        return;
+        if (!mergeGameOver) {
+            currentPlayer.tetromino.forEach((row, y) => {
+                if (mergeGameOver) return; // Stop processing if game over detected
+                row.forEach((value, x) => {
+                     if (mergeGameOver) return;
+                    if (value !== 0) {
+                        const gridY = y + currentPlayer.pos.y;
+                        const gridX = x + currentPlayer.pos.x;
+                        // Ensure we are within grid boundaries before attempting to merge
+                        // Merge piece ONLY within the TETRIS_HEIGHT
+                        if (gridY >= 0 && gridY < TETRIS_HEIGHT && gridX >= 0 && gridX < TETRIS_WIDTH) {
+                             if (newGrid[gridY]?.[gridX]?.[1] === 'clear') {
+                               newGrid[gridY][gridX] = [currentPlayer.pieceType, 'merged'];
+                             } else if (newGrid[gridY]?.[gridX]?.[1] === 'merged') {
+                                 console.warn(`Merge Overlap: Trying to merge onto existing merged block at [${gridX}, ${gridY}]`);
+                                 mergeGameOver = true; // Set local flag
+                                 return; // Exit early if game over
+                             }
+                        } else if (gridY < 0 && gridX >=0 && gridX < TETRIS_WIDTH) {
+                            // Handle case where part of the piece is above the grid top
+                            console.log("Piece merged partially or fully above grid top.");
+                            mergeGameOver = true; // Set local flag
+                            return;
+                        }
                     }
-                }
+                });
             });
-        });
+        }
 
-         if (mergeGameOver) {
-            setGameOver(true); // Ensure game over state is set if merge failed
-            return { newGrid: currentGrid, linesCleared: 0 };
-         }
 
-        // --- Line Clearing ---
+        // --- Line Clearing (only if game isn't over yet) ---
         let clearedLines = 0;
-        const sweptGridRows: TetrisGrid = []; // Only store the valid Tetris rows first
-        // Iterate from bottom of Tetris area up to top (y = TETRIS_HEIGHT - 1 down to 0)
-        for (let y = TETRIS_HEIGHT - 1; y >= 0; y--) {
-             const row = newGrid[y];
-             // Check if the row is entirely filled with 'merged' blocks AND does not contain any 'G' (grey) blocks
-             if (row.every(cell => cell[1] === 'merged' && cell[0] !== 'G')) {
-                 clearedLines++;
-             } else {
-                 sweptGridRows.unshift(row); // Keep rows that are not full or contain grey blocks
-             }
+        let sweptGridRows: TetrisGrid = []; // Only store the valid Tetris rows first
+
+        if (!mergeGameOver) {
+            // Iterate from bottom of Tetris area up to top (y = TETRIS_HEIGHT - 1 down to 0)
+            for (let y = TETRIS_HEIGHT - 1; y >= 0; y--) {
+                 const row = newGrid[y];
+                 // Check if the row is entirely filled with 'merged' blocks AND does not contain any 'G' (grey) blocks
+                 if (row.every(cell => cell[1] === 'merged' && cell[0] !== 'G')) {
+                     clearedLines++;
+                 } else {
+                     sweptGridRows.unshift(row); // Keep rows that are not full or contain grey blocks
+                 }
+            }
+        } else {
+            // If game over happened during merge, just keep existing Tetris rows
+            sweptGridRows = newGrid.slice(0, TETRIS_HEIGHT);
         }
 
          // Reconstruct the full grid
          const finalGrid: TetrisGrid = [];
-        // Add new empty rows at the top for each cleared line
-        while (finalGrid.length < clearedLines) {
-             finalGrid.push(Array(TETRIS_WIDTH).fill([0, 'clear']));
+        // Add new empty rows at the top for each cleared line (if lines were cleared)
+        if (clearedLines > 0 && !mergeGameOver) {
+            while (finalGrid.length < clearedLines) {
+                 finalGrid.push(Array(TETRIS_WIDTH).fill([0, 'clear']));
+            }
+        } else if (!mergeGameOver) {
+             // If no lines cleared and not game over, just add empty rows if needed to reach TETRIS_HEIGHT
+             while (finalGrid.length + sweptGridRows.length < TETRIS_HEIGHT) {
+                finalGrid.push(Array(TETRIS_WIDTH).fill([0, 'clear']));
+             }
         }
         // Add the kept rows
         finalGrid.push(...sweptGridRows);
@@ -355,10 +367,10 @@ export const useTetroPongGame = () => {
          }
 
 
-        return { newGrid: finalGrid, linesCleared: clearedLines };
+        return { newGrid: finalGrid, linesCleared: clearedLines, gameOverTriggered: mergeGameOver };
 
 
-     }, [isPaused]); // Removed gameOver dependency, handled locally
+     }, [isPaused]); // Removed dependencies, relies on passed state
 
 
     // Effect to update Tetris drop speed when speedMultiplier changes
@@ -375,39 +387,47 @@ export const useTetroPongGame = () => {
     // Effect to handle piece collision and merging logic AFTER state update
     useEffect(() => {
         // Only trigger merge when the piece has *just* become collided and not paused, and game is running
-        if (player.collided && player.pos.y < TETRIS_HEIGHT && gameStarted && !gameOver && !isPaused) {
-            const { newGrid, linesCleared } = mergePieceToGrid(grid, player); // Pass current state
+        if (player.collided && gameStarted && !gameOver && !isPaused) {
 
-            // Check if mergePieceToGrid triggered a game over state
-            if (gameOver) return;
+            const { newGrid, linesCleared, gameOverTriggered } = mergePieceToGrid(grid, player); // Pass current state
 
+            // If the merge process itself signaled a game over, set the state and stop
+            if (gameOverTriggered) {
+                 setGameOver(true);
+                 setGameStarted(false);
+                 setTetrisDropTime(null);
+                 setGrid(newGrid); // Update grid to show the state that caused game over
+                 console.log("Game Over triggered by mergePieceToGrid");
+                 return; // Stop further processing in this effect
+            }
+
+            // If merge was successful (no game over yet)
             if (linesCleared > 0) {
                 const pointsEarned = LINE_POINTS[linesCleared] || 0;
                 setScore(prevScore => prevScore + pointsEarned);
             }
 
-            setGrid(newGrid); // Update grid state
+            setGrid(newGrid); // Update grid state with potentially cleared lines
 
             // Reset player *after* grid update. resetPlayer now returns success/fail
             const resetSuccess = resetPlayer(newGrid); // Pass the *updated* grid for spawn check
+
              if (!resetSuccess) {
                  // Game over occurred during resetPlayer (spawn collision)
                  setGameOver(true); // Explicitly set game over here
                  setGameStarted(false); // Ensure game loop stops
                  setTetrisDropTime(null);
+                 console.log("Game Over triggered by resetPlayer (spawn collision)");
              }
 
-        } else if (player.collided && player.pos.y >= TETRIS_HEIGHT && !isPaused && gameStarted && !gameOver) { // Check pause state etc.
-            // Handle case where piece somehow becomes collided below Tetris area (should not happen with correct checks)
-            console.warn("Piece collided below Tetris floor. Resetting.");
-             const resetSuccess = resetPlayer(grid); // Use current grid for reset check
-             if (!resetSuccess) {
-                  setGameOver(true);
-                  setGameStarted(false);
-                  setTetrisDropTime(null);
-             }
+        } else if (player.collided && (!gameStarted || gameOver || isPaused)) {
+            // Handle cases where piece becomes collided but game is not in a state to merge/reset
+            // (e.g., collided right as game ended, or while paused)
+            // We might just need to ensure the drop timer is stopped.
+            setTetrisDropTime(null);
         }
-    }, [player.collided, player.pos.y, gameStarted, gameOver, isPaused, grid, player, mergePieceToGrid, resetPlayer]);
+    }, [player.collided, gameStarted, gameOver, isPaused, grid, player, mergePieceToGrid, resetPlayer]);
+
 
 
     // --- Pong Logic ---
@@ -558,9 +578,9 @@ export const useTetroPongGame = () => {
                                      mutableGrid[y][x] = [0, 'clear']; // Clear the brick
                                      brickBroken = true; // Mark that a brick was broken
                                       // Only add score if it wasn't a grey brick ('G')
-                                      if (brickType !== 'G') {
+                                      // if (brickType !== 'G') { // Keep scoring for grey bricks too for now
                                          scoreAdded = true;
-                                      }
+                                     //  }
                                  }
 
                                  breakLoop = true; // Set flag to exit loops
@@ -615,53 +635,56 @@ export const useTetroPongGame = () => {
     }, tetrisDropTime);
 
 
-    // --- Continuous Movement Handling ---
-    useEffect(() => {
-        if (isPaused || gameOver || !gameStarted) return; // Only run when active
+     // --- Continuous Movement Handling ---
+     useEffect(() => {
+         if (isPaused || gameOver || !gameStarted) return; // Only run when active
 
-        const handleRepeat = (key: string, action: () => void, interval: number) => {
-            const keyState = keysPressed.current[key];
-            if (keyState?.pressed && !keyState.repeatTimeout) {
-                keyState.repeatTimeout = setInterval(() => {
-                    // Ensure key is still pressed inside interval callback
-                    // AND game is still active
-                    if (keysPressed.current[key]?.pressed && !isPaused && !gameOver && gameStarted) {
-                        action();
-                    } else {
-                        // Clear interval if key was released or game state changed
-                        const currentKeyState = keysPressed.current[key];
-                        if(currentKeyState?.repeatTimeout) {
-                            clearInterval(currentKeyState.repeatTimeout);
-                            currentKeyState.repeatTimeout = null;
-                        }
-                    }
-                }, interval);
-            } else if (!keyState?.pressed && keyState?.repeatTimeout !== null) {
-                // Ensure keyState and keyState.repeatTimeout exist before clearing
-                 if (keyState.repeatTimeout) {
+         const handleRepeat = (key: string, action: () => void, interval: number) => {
+             const keyState = keysPressed.current[key];
+             if (keyState?.pressed && !keyState.repeatTimeout) {
+                 keyState.repeatTimeout = setInterval(() => {
+                     // Ensure key is still pressed inside interval callback
+                     // AND game is still active
+                     if (keysPressed.current[key]?.pressed && !isPaused && !gameOver && gameStarted) {
+                         action();
+                     } else {
+                         // Clear interval if key was released or game state changed
+                         const currentKeyState = keysPressed.current[key];
+                         // Check if keyState and repeatTimeout exist before clearing
+                         if (currentKeyState?.repeatTimeout) {
+                             clearInterval(currentKeyState.repeatTimeout);
+                             currentKeyState.repeatTimeout = null;
+                         }
+                     }
+                 }, interval);
+             } else if (!keyState?.pressed && keyState?.repeatTimeout !== null) {
+                 // Ensure keyState and keyState.repeatTimeout exist before clearing
+                 if (keyState?.repeatTimeout) { // Added null check for keyState here as well
                      clearInterval(keyState.repeatTimeout);
                      keyState.repeatTimeout = null;
                  }
-            }
-        };
+             }
+         };
 
+         handleRepeat('arrowleft', () => movePlayer(-1), MOVE_REPEAT_INTERVAL);
+         handleRepeat('arrowright', () => movePlayer(1), MOVE_REPEAT_INTERVAL);
+         handleRepeat('arrowdown', () => dropPlayer(true), SOFT_DROP_REPEAT_INTERVAL);
+         handleRepeat('a', () => { /* Paddle movement handled in updatePongState */ }, MOVE_REPEAT_INTERVAL); // Dummy action, interval just tracks press
+         handleRepeat('s', () => { /* Paddle movement handled in updatePongState */ }, MOVE_REPEAT_INTERVAL); // Dummy action
 
-        handleRepeat('arrowleft', () => movePlayer(-1), MOVE_REPEAT_INTERVAL);
-        handleRepeat('arrowright', () => movePlayer(1), MOVE_REPEAT_INTERVAL);
-        handleRepeat('arrowdown', () => dropPlayer(true), SOFT_DROP_REPEAT_INTERVAL);
+         // Cleanup function to clear intervals on component unmount or pause/game over
+         return () => {
+              // Clear all known repeat intervals
+             ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
+                  const keyState = keysPressed.current[key];
+                 // Check if keyState and repeatTimeout exist before clearing
+                 if (keyState?.repeatTimeout) {
+                     clearInterval(keyState.repeatTimeout);
+                 }
+             });
+         };
+     }, [isPaused, gameOver, gameStarted, movePlayer, dropPlayer]); // Dependencies influencing the logic
 
-        // Cleanup function to clear intervals on component unmount or pause/game over
-        return () => {
-             // Clear all known repeat intervals
-            ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
-                 const keyState = keysPressed.current[key];
-                // Check if keyState and repeatTimeout exist before clearing
-                if (keyState?.repeatTimeout) {
-                    clearInterval(keyState.repeatTimeout);
-                }
-            });
-        };
-    }, [isPaused, gameOver, gameStarted, movePlayer, dropPlayer]); // Dependencies influencing the logic
 
 
     // --- Input Handling ---
@@ -768,7 +791,7 @@ export const useTetroPongGame = () => {
              window.removeEventListener('keydown', handleKeyDown);
              window.removeEventListener('keyup', handleKeyUp);
              // Clear all known repeat intervals on unmount
-              ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
+              ['arrowleft', 'arrowright', 'arrowdown', 'a', 's', ' ', 'arrowup'].forEach(key => { // Include all keys managed
                  const keyState = keysPressed.current[key];
                 if (keyState?.repeatTimeout) {
                     clearInterval(keyState.repeatTimeout);
@@ -798,26 +821,21 @@ export const useTetroPongGame = () => {
         setGameStarted(false); // Set to false initially, will be set to true later
         setIsPaused(false); // Ensure game is not paused
         setScore(0); // Reset score
-        setGrid(initialGrid); // Set grid
+        setGrid(initialGrid); // Set grid FIRST, before resetting player
         setBall({ // Reset ball state
             ...baseInitialBallState,
             dx: INITIAL_BALL_SPEED_X * (Math.random() > 0.5 ? 1 : -1), // Randomize initial X direction
             dy: INITIAL_BALL_SPEED_Y,
         });
         setPaddle(baseInitialPaddleState); // Reset paddle state
-        setPlayer(baseInitialPlayerState); // Reset player state to default
 
-        // Need to explicitly calculate the initial multiplier based on the reset score (0)
-        const initialMultiplier = Math.pow(1.05, Math.floor(0 / 12)); // Should be 1
-        const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / initialMultiplier);
-
-        // Set initial drop time AFTER other state resets
-        setTetrisDropTime(initialDropTime);
+        // Important: Set player state *before* calling resetPlayer for the first piece
+        setPlayer(baseInitialPlayerState); // Reset player to default empty state
 
         // Mark game as started *before* the final player reset
         setGameStarted(true);
 
-        // Reset player piece *after* setting gameStarted and AFTER all other states are reset.
+        // Reset player to get the first piece, *after* grid and gameStarted are set.
         // Pass the freshly created initialGrid.
         const resetSuccess = resetPlayer(initialGrid);
 
@@ -825,10 +843,14 @@ export const useTetroPongGame = () => {
             // This indicates a spawn collision immediately on start, which shouldn't happen
             // with the current logic but is kept as a safeguard.
             console.error("Game over immediately on start - spawn collision?");
-            setGameOver(true); // Set game over state
-            setGameStarted(false); // Set back to false as game couldn't start
+            setGameStarted(false); // Set back to false if reset failed
+            setGameOver(true);
             setTetrisDropTime(null); // Ensure timer is null if game over on start
         } else {
+             // Calculate initial drop time AFTER successful reset
+             const initialMultiplier = Math.pow(1.05, Math.floor(0 / 12)); // Should be 1
+             const initialDropTime = Math.max(100, TETRIS_DROP_INTERVAL_INITIAL / initialMultiplier);
+             setTetrisDropTime(initialDropTime);
              console.log("Game started successfully, initial drop time:", initialDropTime);
         }
 
@@ -864,5 +886,3 @@ export const useTetroPongGame = () => {
         paddleY: PADDLE_Y,
     };
 };
-
-    
