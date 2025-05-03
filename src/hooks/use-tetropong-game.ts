@@ -547,13 +547,10 @@ export const useTetroPongGame = () => {
 
                                  // Break the collided brick (grey or colored)
                                  if (mutableGrid[y][x][0] !== 0) { // Check if it's not already cleared
-                                     const brickType = mutableGrid[y][x][0]; // Get brick type before clearing
+                                     // const brickType = mutableGrid[y][x][0]; // Get brick type before clearing
                                      mutableGrid[y][x] = [0, 'clear']; // Clear the brick
                                      brickBroken = true; // Mark that a brick was broken
-                                     // Only add score if it wasn't a grey brick (was only scoring non-grey)
-                                      // Correction: Add score for ANY broken brick (grey or colored)
-                                      scoreAdded = true; // Always add score now
-
+                                     scoreAdded = true; // Always add score now
                                  }
 
                                  breakLoop = true; // Set flag to exit loops
@@ -622,18 +619,22 @@ export const useTetroPongGame = () => {
                     } else {
                         // Clear interval if key was released between checks
                         // Check keyState and repeatTimeout again before clearing
-                        if(keysPressed.current[key]?.repeatTimeout) {
-                            clearInterval(keysPressed.current[key].repeatTimeout!);
-                            keysPressed.current[key].repeatTimeout = null;
+                        const currentKeyState = keysPressed.current[key];
+                        if(currentKeyState?.repeatTimeout) {
+                            clearInterval(currentKeyState.repeatTimeout);
+                            currentKeyState.repeatTimeout = null;
                         }
                     }
                 }, interval);
             } else if (!keyState?.pressed && keyState?.repeatTimeout !== null) {
                 // Ensure keyState and keyState.repeatTimeout exist before clearing
-                clearInterval(keyState.repeatTimeout);
-                keyState.repeatTimeout = null;
+                if(keyState && keyState.repeatTimeout){
+                     clearInterval(keyState.repeatTimeout);
+                     keyState.repeatTimeout = null;
+                 }
             }
         };
+
 
         handleRepeat('arrowleft', () => movePlayer(-1), MOVE_REPEAT_INTERVAL);
         handleRepeat('arrowright', () => movePlayer(1), MOVE_REPEAT_INTERVAL);
@@ -647,8 +648,6 @@ export const useTetroPongGame = () => {
                 // Check if keyState and repeatTimeout exist before clearing
                 if (keyState?.repeatTimeout) {
                     clearInterval(keyState.repeatTimeout);
-                    // Optional: Reset the timeout property in the ref, though the ref might be cleared entirely later
-                    // keyState.repeatTimeout = null;
                 }
             });
         };
