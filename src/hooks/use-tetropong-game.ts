@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
@@ -41,7 +40,7 @@ export type Paddle = {
 type KeyState = {
     pressed: boolean;
     firstPressTime: number | null;
-    repeatTimeout: NodeJS.Timeout | null;
+    repeatTimeout: ReturnType<typeof setInterval> | null;
 };
 
 const baseInitialPlayerState: Player = {
@@ -84,6 +83,12 @@ export const useTetroPongGame = () => {
 
     // Ref to store key pressed state, including repeat timeouts
     const keysPressed = useRef<{ [key: string]: KeyState }>({});
+    
+    // Direct key state for paddle movement (completely decoupled from tetris)
+    const paddleKeysPressed = useRef<{ [key: string]: boolean }>({
+        'a': false,
+        's': false
+    });
 
     // Calculate speed multiplier based on score (cumulative 5% increase per 12 points)
     const speedMultiplier = useMemo(() => {
@@ -275,7 +280,7 @@ export const useTetroPongGame = () => {
         // Set position to the lowest possible point and mark as collided
         setPlayer(prev => ({ ...prev, pos: { ...prev.pos, y: newY }, collided: true }));
         setTetrisDropTime(null); // Stop the interval immediately
-    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]); // Add isPaused
+    }, [player, grid, checkTetrisCollision, gameOver, gameStarted, isPaused]);
 
 
      // --- Merge and Line Clear ---
@@ -434,22 +439,7 @@ export const useTetroPongGame = () => {
     const updatePongState = useCallback(() => {
         if (isPaused || gameOver) return; // Don't update pong if paused or game over
 
-         // Update Paddle Position (apply speed multiplier)
-         setPaddle(prevPaddle => {
-           let newX = prevPaddle.x;
-           const currentPaddleSpeed = PADDLE_SPEED * speedMultiplier; // Apply multiplier
-           if (keysPressed.current['a']?.pressed) { // Check key state
-             newX -= currentPaddleSpeed;
-           }
-           if (keysPressed.current['s']?.pressed) { // Check key state
-             newX += currentPaddleSpeed;
-           }
-           // Clamp paddle position within court bounds
-           newX = Math.max(0, Math.min(newX, GAME_WIDTH - PADDLE_WIDTH));
-           return { x: newX };
-         });
-
-        // Update Ball Position and Handle Collisions
+        // Ball and collision logic - don't change the original logic structure
         setBall(prevBall => {
             let nextX = prevBall.x; // Start with current pos
             let nextY = prevBall.y;
@@ -464,7 +454,6 @@ export const useTetroPongGame = () => {
 
             nextX += currentDx;
             nextY += currentDy;
-
 
             // --- Boundary Collisions ---
             // Left/Right Walls
@@ -618,19 +607,44 @@ export const useTetroPongGame = () => {
 
     }, [paddle.x, grid, score, speedMultiplier, isPaused, minDxThreshold, gameOver]); // Add gameOver dependency
 
+    // New function to handle paddle movement separately from the ball and tetris
+    const updatePaddlePosition = useCallback(() => {
+        if (isPaused || gameOver || !gameStarted) return;
+        
+        setPaddle(prevPaddle => {
+            let newX = prevPaddle.x;
+            const currentPaddleSpeed = PADDLE_SPEED * speedMultiplier; // Apply multiplier
+            
+            if (paddleKeysPressed.current['a']) { // Use direct key state ref
+                newX -= currentPaddleSpeed;
+            }
+            if (paddleKeysPressed.current['s']) { // Use direct key state ref
+                newX += currentPaddleSpeed;
+            }
+            
+            // Clamp paddle position within court bounds
+            newX = Math.max(0, Math.min(newX, GAME_WIDTH - PADDLE_WIDTH));
+            return { x: newX };
+        });
+    }, [isPaused, gameOver, gameStarted, speedMultiplier]);
 
-    // --- Game Loop ---
+    // --- Game Loop for ball movement and collision detection ---
     useInterval(() => {
-        if (!isClient || !gameStarted || gameOver || isPaused) return; // Check pause state and gameOver
+        if (!isClient || !gameStarted || gameOver || isPaused) return;
         updatePongState();
         // Tetris drop is handled by its own interval (tetrisDropTime)
-    }, gameStarted && !gameOver && !isPaused ? GAME_TICK_MS : null); // Add isPaused and gameOver check
+    }, gameStarted && !gameOver && !isPaused ? GAME_TICK_MS : null);
 
+    // --- Paddle Movement Loop - Higher frequency for smoother movement ---
+    useInterval(() => {
+        if (!isClient || !gameStarted || gameOver || isPaused) return;
+        updatePaddlePosition();
+    }, gameStarted && !gameOver && !isPaused ? 8 : null); // 8ms = ~120fps for extremely smooth movement
 
     // --- Tetris Auto Drop Interval ---
-     useInterval(() => {
+    useInterval(() => {
         // Only drop if game is running, not over, and piece hasn't collided yet and not paused
-        if (!isClient || !gameStarted || gameOver || player.collided || isPaused) return; // Check pause state and gameOver
+        if (!isClient || !gameStarted || gameOver || player.collided || isPaused) return;
         dropPlayer(false); // Auto-drop is not a soft drop
     }, tetrisDropTime);
 
@@ -666,16 +680,17 @@ export const useTetroPongGame = () => {
              }
          };
 
+         // Only set up continuous movement for Tetris controls - paddle movement is handled by separate interval
          handleRepeat('arrowleft', () => movePlayer(-1), MOVE_REPEAT_INTERVAL);
          handleRepeat('arrowright', () => movePlayer(1), MOVE_REPEAT_INTERVAL);
          handleRepeat('arrowdown', () => dropPlayer(true), SOFT_DROP_REPEAT_INTERVAL);
-         handleRepeat('a', () => { /* Paddle movement handled in updatePongState */ }, MOVE_REPEAT_INTERVAL); // Dummy action, interval just tracks press
-         handleRepeat('s', () => { /* Paddle movement handled in updatePongState */ }, MOVE_REPEAT_INTERVAL); // Dummy action
+         
+         // Paddle controls don't need repeat timeouts anymore, they're handled by the high-frequency paddle interval
 
          // Cleanup function to clear intervals on component unmount or pause/game over
          return () => {
               // Clear all known repeat intervals
-             ['arrowleft', 'arrowright', 'arrowdown', 'a', 's'].forEach(key => {
+             ['arrowleft', 'arrowright', 'arrowdown'].forEach(key => {
                   const keyState = keysPressed.current[key];
                  // Check if keyState and repeatTimeout exist before clearing
                  if (keyState?.repeatTimeout) {
@@ -683,102 +698,100 @@ export const useTetroPongGame = () => {
                  }
              });
          };
-     }, [isPaused, gameOver, gameStarted, movePlayer, dropPlayer]); // Dependencies influencing the logic
+     }, [isPaused, gameOver, gameStarted, movePlayer, dropPlayer]);
 
 
 
     // --- Input Handling ---
     const handleKeyDown = useCallback((event: KeyboardEvent) => {
-         if (!isClient) return; // Ignore input if not client
+        if (!isClient) return; // Ignore input if not client
 
         const keyLower = event.key.toLowerCase();
         let handled = false;
 
         // Pause Toggle (works even if game not started or over, but only if client)
-         if (keyLower === 'p') {
+        if (keyLower === 'p') {
             if (gameStarted || isPaused) { // Allow pausing/unpausing if game started or already paused
                 setIsPaused(prev => {
                     const nextPaused = !prev;
                     console.log(nextPaused ? "Game Paused" : "Game Resumed");
                     // Clear movement intervals on pause
-                     if (nextPaused) {
+                    if (nextPaused) {
                         Object.values(keysPressed.current).forEach(keyState => {
                             if (keyState?.repeatTimeout) { // Check if keyState exists
                                 clearInterval(keyState.repeatTimeout);
                                 keyState.repeatTimeout = null;
                             }
                         });
-                     }
+                        // Also reset paddle key states on pause
+                        paddleKeysPressed.current = { 'a': false, 's': false };
+                    }
                     return nextPaused;
                 });
                 handled = true;
             }
-         }
+        }
 
-         // Ignore other inputs if paused or game not ready/active
-         if (isPaused || !gameStarted || gameOver) {
-            if (handled) event.preventDefault(); // Prevent default for 'p' even when paused
-            return;
-         }
-
-        // Pong Controls (continuous) - Store lowercase
-        if (keyLower === 'a' || keyLower === 's') {
-             if (!keysPressed.current[keyLower]?.pressed) {
-                keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
-            }
+        // Paddle controls are directly set in the ref - completely separate from the keysPressed ref
+        if (gameStarted && !gameOver && !isPaused && (keyLower === 'a' || keyLower === 's')) {
+            paddleKeysPressed.current[keyLower] = true;
             handled = true;
         }
 
-        // Tetris Controls
-        if (keyLower === 'arrowleft' || keyLower === 'arrowright' || keyLower === 'arrowdown') {
-             if (!keysPressed.current[keyLower]?.pressed) { // First press
-                 keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
-                 if (keyLower === 'arrowleft') movePlayer(-1);
-                 if (keyLower === 'arrowright') movePlayer(1);
-                 if (keyLower === 'arrowdown') dropPlayer(true); // Initial soft drop
-
-                 // The useEffect hook now handles setting up the interval based on the 'pressed' state
-             }
-             handled = true;
-         } else if (keyLower === 'arrowup') {
-             // Rotate - discrete, only on first press
-             if (!keysPressed.current[keyLower]?.pressed) {
-                  playerRotate();
-                  keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
-             }
-             handled = true;
-         } else if (keyLower === ' ') { // Space for Hard drop - discrete
-             if (!keysPressed.current[keyLower]?.pressed) {
-                 hardDropPlayer();
-                 keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
-             }
-             handled = true;
-         }
-
+        // Other controls only work when game is fully active
+        if (!isPaused && gameStarted && !gameOver) {
+            // Tetris Controls
+            if (keyLower === 'arrowleft' || keyLower === 'arrowright' || keyLower === 'arrowdown') {
+                if (!keysPressed.current[keyLower]?.pressed) { // First press
+                    keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
+                    if (keyLower === 'arrowleft') movePlayer(-1);
+                    if (keyLower === 'arrowright') movePlayer(1);
+                    if (keyLower === 'arrowdown') dropPlayer(true); // Initial soft drop
+                }
+                handled = true;
+            } else if (keyLower === 'arrowup') {
+                // Rotate - discrete, only on first press
+                if (!keysPressed.current[keyLower]?.pressed) {
+                    playerRotate();
+                    keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
+                }
+                handled = true;
+            } else if (keyLower === ' ') { // Space for Hard drop - discrete
+                if (!keysPressed.current[keyLower]?.pressed) {
+                    hardDropPlayer();
+                    keysPressed.current[keyLower] = { pressed: true, firstPressTime: Date.now(), repeatTimeout: null };
+                }
+                handled = true;
+            }
+        }
 
         if (handled) {
-             event.preventDefault(); // Prevent default browser actions (e.g., scrolling)
+            event.preventDefault(); // Prevent default browser actions (e.g., scrolling)
         }
-
-    }, [gameOver, gameStarted, isPaused, movePlayer, hardDropPlayer, playerRotate, dropPlayer, isClient]); // Added dropPlayer, isPaused
+    }, [gameOver, gameStarted, isPaused, movePlayer, hardDropPlayer, playerRotate, dropPlayer, isClient]);
 
     const handleKeyUp = useCallback((event: KeyboardEvent) => {
-         if (!isClient) return;
+        if (!isClient) return;
         const keyLower = event.key.toLowerCase();
-        const keyState = keysPressed.current[keyLower];
-
-        if (keyState) {
-             // Clear the interval directly if it exists
-             if (keyState.repeatTimeout) {
-                 clearInterval(keyState.repeatTimeout);
-             }
-            // Update the state in the ref
-             keyState.pressed = false;
-             keyState.firstPressTime = null;
-             keyState.repeatTimeout = null;
+        
+        // Handle paddle keys directly
+        if (keyLower === 'a' || keyLower === 's') {
+            paddleKeysPressed.current[keyLower] = false;
         }
-
-    }, [isClient]); // Removed unnecessary dependencies
+        
+        // Handle tetris keys through the keysPressed ref
+        const keyState = keysPressed.current[keyLower];
+        if (keyState) {
+            // Clear the interval directly if it exists
+            if (keyState.repeatTimeout) {
+                clearInterval(keyState.repeatTimeout);
+            }
+            // Update the state in the ref
+            keyState.pressed = false;
+            keyState.firstPressTime = null;
+            keyState.repeatTimeout = null;
+        }
+    }, [isClient]);
 
 
      // Attach event listeners only on the client
@@ -807,12 +820,13 @@ export const useTetroPongGame = () => {
         console.log("Starting Game");
 
         // Clear any existing intervals/timeouts from previous game state
-         Object.values(keysPressed.current).forEach(keyState => {
-             if (keyState?.repeatTimeout) {
-                 clearInterval(keyState.repeatTimeout);
-             }
-         });
-         keysPressed.current = {}; // Reset keys pressed state fully
+        Object.values(keysPressed.current).forEach(keyState => {
+            if (keyState?.repeatTimeout) {
+                clearInterval(keyState.repeatTimeout);
+            }
+        });
+        keysPressed.current = {}; // Reset keys pressed state fully
+        paddleKeysPressed.current = { 'a': false, 's': false }; // Reset paddle keys
 
         const initialGrid = createEmptyGrid(); // Create fresh grid
 

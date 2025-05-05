@@ -1,4 +1,3 @@
-
 import { TETRIS_WIDTH, TOTAL_GRID_HEIGHT } from '@/components/tetris/constants';
 
 // Dimensions are now relative to the grid units
@@ -14,7 +13,7 @@ export const BALL_RADIUS = 0.4; // Radius in grid cells
 // Need tuning depending on the interval speed
 export const INITIAL_BALL_SPEED_X = 0.15; // Cells per update tick
 export const INITIAL_BALL_SPEED_Y = 0.15; // Cells per update tick
-export const PADDLE_SPEED = 0.4; // Cells per update tick
+export const PADDLE_SPEED = 0.05; // Cells per update tick (reduced from 0.4 for slower start)
 
 // Paddle Y position (close to the bottom)
 export const PADDLE_Y = GAME_HEIGHT - PADDLE_HEIGHT - 1;

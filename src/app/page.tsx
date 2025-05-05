@@ -1,11 +1,11 @@
-
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import GameDisplay from '@/components/tetropong/game-display';
 import { useTetroPongGame } from '@/hooks/use-tetropong-game';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Leaderboard from '@/components/leaderboard/leaderboard';
 
 export default function Home() {
   const {
@@ -26,6 +26,27 @@ export default function Home() {
     paddleY,
     speedMultiplier,
   } = useTetroPongGame();
+
+  // State to manage whether to show the leaderboard or the game
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  // Function to toggle between game and leaderboard
+  const toggleLeaderboard = () => {
+    setShowLeaderboard(!showLeaderboard);
+  };
+
+  // When game is over, show the leaderboard
+  React.useEffect(() => {
+    if (gameOver && score > 0) {
+      setShowLeaderboard(true);
+    }
+  }, [gameOver, score]);
+
+  // Handle play again from leaderboard
+  const handlePlayAgain = () => {
+    setShowLeaderboard(false);
+    startGame();
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-background text-foreground relative">
@@ -48,27 +69,35 @@ export default function Home() {
           </div>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center">
-          {!gameStarted && !gameOver && (
+          {!gameStarted && !gameOver && !showLeaderboard && (
             <div className="text-center py-10">
               <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to Pongtris!</h2> {/* Renamed */}
               <p className="mb-6 text-lg">Clear lines, break bricks!</p>
-              <Button onClick={startGame} size="lg">Start Game</Button>
+              <div className="flex flex-col space-y-3">
+                <Button onClick={startGame} size="lg">Start Game</Button>
+                <Button onClick={toggleLeaderboard} variant="outline">View Leaderboard</Button>
+              </div>
             </div>
           )}
-           {isPaused && gameStarted && ( // Show pause message only when game started
+           {isPaused && gameStarted && !showLeaderboard && ( // Show pause message only when game started
              <div className="text-center py-10">
                <h2 className="text-3xl font-bold text-primary mb-4">Paused</h2>
                <p className="text-lg mb-6">Press 'P' to resume</p>
              </div>
            )}
-          {gameOver && (
-            <div className="text-center py-10">
-              <h2 className="text-3xl font-bold text-destructive mb-4">Game Over!</h2>
-              <p className="text-xl mb-6">Your final score: {score}</p>
-              <Button onClick={startGame} size="lg" variant="secondary">Play Again?</Button>
-            </div>
+          {showLeaderboard && (
+            <Leaderboard 
+              score={score} 
+              gameOver={gameOver} 
+              onPlayAgain={handlePlayAgain}
+              onShowHome={() => {
+                if (!gameOver) {
+                  setShowLeaderboard(false);
+                }
+              }}
+            />
           )}
-          {gameStarted && !isPaused && ( // Render game only if started and not paused
+          {gameStarted && !isPaused && !showLeaderboard && ( // Render game only if started and not paused
             <div
                 className="w-full flex justify-center items-center"
                 // Set max height using CSS variable for GameDisplay to consume

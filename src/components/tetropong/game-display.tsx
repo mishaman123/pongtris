@@ -1,4 +1,3 @@
-
 'use client';
 
 import React from 'react';
@@ -65,6 +64,7 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
               key={`${y}-${x}`}
               type={cellData[0]}
               state={cellData[1] as 'clear' | 'merged' | 'player'}
+              inPongArea={y >= tetrisHeight} // Cells below tetris height are in pong area
             />
           ))
         )}
