@@ -59,14 +59,18 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
         }}
       >
         {grid.map((row, y) =>
-          row.map((cellData, x) => (
-            <TetrisCell
-              key={`${y}-${x}`}
-              type={cellData[0]}
-              state={cellData[1] as 'clear' | 'merged' | 'player'}
-              inPongArea={y >= tetrisHeight} // Cells below tetris height are in pong area
-            />
-          ))
+          row.map((cellData, x) => {
+            // Safely cast cellData to an array to avoid TypeScript errors
+            const cellArray = cellData as [string | number, string];
+            return (
+              <TetrisCell
+                key={`${y}-${x}`}
+                type={cellArray[0]}
+                state={cellArray[1] as 'clear' | 'merged' | 'player'}
+                inPongArea={y >= tetrisHeight} // Cells below tetris height are in pong area
+              />
+            );
+          })
         )}
       </div>
 
