@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTopScores } from '@/lib/leaderboard';
 
+// Required for static export
+export const dynamic = "force-static";
+
 // GET handler for fetching top scores
 export async function GET(req: NextRequest) {
   try {
