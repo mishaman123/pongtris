@@ -60,8 +60,11 @@ const GameDisplay: React.FC<GameDisplayProps> = ({
       >
         {grid.map((row, y) =>
           row.map((cellData, x) => {
-            // Safely cast cellData to an array to avoid TypeScript errors
-            const cellArray = cellData as [string | number, string];
+            // Safely handle the cell data for TypeScript
+            // First cast to unknown, then to the array type
+            const typeSafeCellData = cellData as unknown;
+            const cellArray = typeSafeCellData as [string | number, string];
+            
             return (
               <TetrisCell
                 key={`${y}-${x}`}
