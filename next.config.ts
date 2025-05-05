@@ -12,20 +12,14 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'picsum.photos',
-        port: '',
-        pathname: '/**',
-      },
-    ],
-    unoptimized: true,
-  },
+  // Images config for static export
   output: 'export',
   basePath,
   trailingSlash: true,
+  // Image optimization must be turned off for static exports
+  images: {
+    unoptimized: true,
+  },
 };
 
 export default nextConfig;
