@@ -5,7 +5,8 @@ import GameDisplay from '@/components/tetropong/game-display';
 import { useTetroPongGame } from '@/hooks/use-tetropong-game';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import Leaderboard from '@/components/leaderboard/leaderboard';
+// Comment out Leaderboard import
+// import Leaderboard from '@/components/leaderboard/leaderboard';
 
 export default function Home() {
   const {
@@ -27,26 +28,27 @@ export default function Home() {
     speedMultiplier,
   } = useTetroPongGame();
 
-  // State to manage whether to show the leaderboard or the game
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  // State to manage whether to show the leaderboard or the game - COMMENTED OUT
+  // const [showLeaderboard, setShowLeaderboard] = useState(false);
 
-  // Function to toggle between game and leaderboard
-  const toggleLeaderboard = () => {
-    setShowLeaderboard(!showLeaderboard);
-  };
+  // Function to toggle between game and leaderboard - COMMENTED OUT
+  // const toggleLeaderboard = () => {
+  //   setShowLeaderboard(!showLeaderboard);
+  // };
 
-  // When game is over, show the leaderboard
-  React.useEffect(() => {
-    if (gameOver && score > 0) {
-      setShowLeaderboard(true);
-    }
-  }, [gameOver, score]);
+  // When game is over, show the leaderboard - COMMENTED OUT
+  // React.useEffect(() => {
+  //   if (gameOver) { // Simplified: just check gameOver
+  //     setShowLeaderboard(true);
+  //   }
+  // }, [gameOver]);
 
-  // Handle play again from leaderboard
-  const handlePlayAgain = () => {
-    setShowLeaderboard(false);
-    startGame();
-  };
+  // Handle play again (originally from leaderboard, now simplified/potentially unused)
+  // We might not need this specific handler if only called from the removed leaderboard
+  // const handlePlayAgain = () => {
+  //   setShowLeaderboard(false);
+  //   startGame();
+  // };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-background text-foreground relative">
@@ -58,49 +60,66 @@ export default function Home() {
           <p><span className="font-semibold">Game:</span> P (Pause)</p>
        </div>
 
-      <Card className="w-full max-w-md mb-4 bg-card text-card-foreground shadow-lg">
-        <CardHeader className="flex flex-row items-center justify-between pb-2 space-x-4">
-          <CardTitle className="text-2xl font-bold text-primary">Pongtris</CardTitle> {/* Renamed */}
-          <div className="flex items-center space-x-4 text-right">
-             <div className="text-base font-semibold text-secondary-foreground">
-                 Speed: {speedMultiplier.toFixed(2)}x
-              </div>
-            <div className="text-xl font-semibold text-accent">Score: {score}</div>
+      <Card className="w-full max-w-4xl mx-auto shadow-xl">
+        <CardHeader>
+          <CardTitle className="text-center text-3xl font-bold tracking-tight flex items-center justify-center gap-2">
+            <span className="text-blue-500">Pong</span><span className="text-red-500">tris</span>
+            <span className="text-xs font-mono px-2 py-1 bg-muted rounded">v0</span>
+          </CardTitle>
+          {/* Display score centered */} 
+          <div className="text-center mt-2">
+            <p className="text-xl font-semibold">Score: {score.toLocaleString()}</p>
+            <p className="text-sm text-muted-foreground">Speed: x{speedMultiplier.toFixed(2)}</p>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center">
-          {!gameStarted && !gameOver && !showLeaderboard && (
+          {/* Initial state: Show Start Game button */} 
+          {!gameStarted && !gameOver && (
             <div className="text-center py-10">
-              <h2 className="text-2xl font-bold mb-4 text-primary">Welcome to Pongtris!</h2> {/* Renamed */}
-              <p className="mb-6 text-lg">Clear lines, break bricks!</p>
+              <p className="mb-6 text-lg">Arrow keys for Tetris. A/S for Pong.</p>
               <div className="flex flex-col space-y-3">
                 <Button onClick={startGame} size="lg">Start Game</Button>
-                <Button onClick={toggleLeaderboard} variant="outline">View Leaderboard</Button>
+                {/* Comment out View Leaderboard Button */}
+                {/* <Button onClick={toggleLeaderboard} variant="outline">View Leaderboard</Button> */}
               </div>
             </div>
           )}
-           {isPaused && gameStarted && !showLeaderboard && ( // Show pause message only when game started
+
+          {/* Game Over State: Show game over message and play again button */} 
+          {gameOver && (
+             <div className="text-center py-10">
+               <h2 className="text-3xl font-bold text-destructive mb-4">Game Over!</h2>
+               <p className="text-xl mb-6">Final Score: {score.toLocaleString()}</p>
+               <Button onClick={startGame} size="lg">Play Again</Button>
+             </div>
+           )}
+
+           {/* Paused State */}
+           {isPaused && gameStarted && !gameOver && (
              <div className="text-center py-10">
                <h2 className="text-3xl font-bold text-primary mb-4">Paused</h2>
                <p className="text-lg mb-6">Press 'P' to resume</p>
              </div>
            )}
-          {showLeaderboard && (
-            <Leaderboard 
-              score={score} 
-              gameOver={gameOver} 
-              onPlayAgain={handlePlayAgain}
-              onShowHome={() => {
-                if (!gameOver) {
-                  setShowLeaderboard(false);
-                }
-              }}
-            />
-          )}
-          {gameStarted && !isPaused && !showLeaderboard && ( // Render game only if started and not paused
+
+          {/* Leaderboard display - COMMENTED OUT */}
+          {/* {showLeaderboard && ( */}
+          {/*   <Leaderboard */}
+          {/*     score={score} */}
+          {/*     gameOver={gameOver} */}
+          {/*     onPlayAgain={handlePlayAgain} // Use the potentially simplified handler */}
+          {/*     onShowHome={() => { */}
+          {/*       // Logic to return to game view if game wasn't actually over? */}
+          {/*       // This might need refinement based on desired flow */}
+          {/*       setShowLeaderboard(false); */}
+          {/*     }} */}
+          {/*   /> */}
+          {/* )} */}
+          
+          {/* Game display area - Render only when game is active and not paused/over */} 
+          {gameStarted && !isPaused && !gameOver && (
             <div
                 className="w-full flex justify-center items-center"
-                // Set max height using CSS variable for GameDisplay to consume
                 style={{ '--game-max-height': '80vh' } as React.CSSProperties}
             >
                 <GameDisplay

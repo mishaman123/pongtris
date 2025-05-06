@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addScore, isHighScore } from '@/lib/leaderboard';
 
-// Required for static export
-export const dynamic = "force-static";
+// Required for static export - REMOVED
+// export const dynamic = "force-static";
 
 // POST handler for submitting a new score
 export async function POST(req: NextRequest) {
